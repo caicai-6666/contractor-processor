@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.coverage
+.venv/
+venv/
+
+# Local configuration and runtime data
+.env
+data/input/*
+!data/input/.gitkeep
+data/runs/*
+!data/runs/.gitkeep
+data/artifacts/*
+!data/artifacts/.gitkeep
+data/stores/*
+!data/stores/.gitkeep
+data/logs/*
+!data/logs/.gitkeep
+
+# Exploratory demo outputs
+experiments/outputs/*
+!experiments/outputs/.gitkeep
+
+# IDE
+.idea/

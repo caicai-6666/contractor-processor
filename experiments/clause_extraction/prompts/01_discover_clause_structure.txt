@@ -1,0 +1,43 @@
+{{PAGE_VISIBILITY_CONTEXT}}
+
+【Step 1：从上到下穷举 Clause 结构候选】
+
+本步骤只做结构发现，不判断某项最终是否属于合同条款。请从 PDF 第一页到最后一页逐页扫描，严格按视觉阅读顺序穷举所有“标题、编号、标签、分点”形成的结构候选，输出 candidates。不要因为某项看起来像产品、金额、主体或签署资料而提前排除；资格筛选由下一步完成。
+
+【候选粒度】
+1. 优先记录最小的、有独立结构边界的内容单元，而不是只记录包住多个分点的大章节。
+2. 顶层标题下没有分点时，输出一个候选：parent_clause_number、parent_heading 取顶层编号和标题，item_marker、item_heading 为 null。
+3. 顶层标题下存在“（1）”“(2)”“1.”等分点时，每个分点各输出一个候选：
+   - parent_clause_number、parent_heading 保存最近的上级编号和标题；
+   - item_marker 原样保存“（1）”“(2)”“1.”等分点标记；
+   - 分点自身存在标签或标题时，item_heading 逐字保存；否则为 null。
+4. “(n) 标签：正文”“（n）标签 正文”中的“标签”属于原文明示的 item_heading，不能只识别编号而漏掉标签。
+5. 项目符号后的独立标签同样属于 item_heading。例如“◆ 付款方式：……”中，item_marker 保存“◆”，item_heading 保存“付款方式”。
+6. 项目符号后没有自身标签时，item_heading 为 null，但必须保留最近的 parent_heading，供下一步判断是否继承。
+7. 无编号但明确可见的标题仍要记录，编号字段为 null。既无标题也无编号、但版面上明显属于某个标题下的分点，也要以项目符号或分点标记记录。
+
+【字段填写示例】
+以下示例只说明字段之间的关系，不是待提取的合同内容：
+
+1. 顶层“第四条 甲方责任与义务”且没有子项：
+   `parent_clause_number="第四条"`，`parent_heading="甲方责任与义务"`，`item_marker=null`，`item_heading=null`。
+2. “第四条 甲方责任与义务”下的“（1）甲方应提供资料”：
+   `parent_clause_number="第四条"`，`parent_heading="甲方责任与义务"`，`item_marker="（1）"`，`item_heading=null`。
+3. “(3) 交货日期：合同生效后十日内”：
+   `parent_clause_number=null`，`parent_heading=null`，`item_marker="(3)"`，`item_heading="交货日期"`。
+4. “附加信息”下的“◆ 付款方式：全款到发货”：
+   `parent_clause_number=null`，`parent_heading="附加信息"`，`item_marker="◆"`，`item_heading="付款方式"`。
+5. “附加信息”下的“◆ 本合同自签订之日起生效”：
+   `parent_clause_number=null`，`parent_heading="附加信息"`，`item_marker="◆"`，`item_heading=null`。
+
+不得把上例中的编号、标题或项目符号全部留空后只写入 opening_anchor；结构字段和锚点必须同时正确填写。
+
+【字段规则】
+- opening_anchor：逐字摘录该候选开头的短原文，必须足以在整份 PDF 中重新定位，不写摘要或位置说明。
+- page_refs：列出该候选实际出现的全部物理页，跨页内容保持为同一候选。
+- 所有字符串保留原文格式；不得把“3.1”当作数字，也不得按数组位置补编号。
+
+【覆盖检查】
+输出前必须再从最后一页反向检查一次候选数量，尤其不得遗漏：质量、质保、保修、售后服务、维修更换、维护、技术支持、培训、响应时限、附加信息、其他约定及附件中的标题或分点。重点检查只用于防漏，不得改变原文顺序。
+
+输出必须符合提供的 JSON Schema，不要输出 Markdown。

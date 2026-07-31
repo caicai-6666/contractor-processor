@@ -1,0 +1,42 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "contract-processor"
+version = "0.1.0"
+description = "面向 PDF 合同的元数据发现工作流"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "langgraph>=1.2,<2.0",
+  "llama-index-core>=0.14,<0.15",
+  "openai>=2.0,<3.0",
+  "PyYAML>=6.0,<7.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "jsonschema>=4.23,<5.0",
+  "pytest>=8.0,<9.0",
+]
+experiments = [
+  "jsonschema>=4.23,<5.0",
+  "pydantic>=2.8,<3.0",
+  "PyMuPDF>=1.24,<2.0",
+  "python-dotenv>=1.0,<2.0",
+]
+
+[project.scripts]
+contract-processor = "contract_processor.interfaces.cli.app:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]

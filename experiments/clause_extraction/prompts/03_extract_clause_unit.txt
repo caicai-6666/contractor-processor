@@ -1,0 +1,24 @@
+{{PAGE_VISIBILITY_CONTEXT}}
+
+【Step 3：抽取当前单个 Clause】
+
+当前单元已经通过 Step 2 的逐候选条款资格判断。本步骤只回到整份 PDF 定位该单元并完整抄录原文，必须输出且只能输出一个 clauses 元素。
+
+【输出规则】
+1. clause_number 和 heading 必须原样使用当前单元中程序解析的值，不得自行更换、概括或置空。
+2. heading_source=own 表示标题属于当前单元自身，source_text 必须保留该标题原文，并从标题或编号开始保留完整内容。PDF 为视觉排版插入的字间空格、换行或制表符应在 source_text 中原样保留；程序会清除 heading 比较形式中的空白，并使用允许标题字符之间出现空白的正则匹配原始 source_text。
+3. heading_source=inherited 表示当前子项没有自己的标题，heading 来自最近父标题；source_text 只抄录当前子项的编号、标记和正文，不得为了满足格式而把父标题伪造进子项原文。
+4. source_text 必须保留完整条件、例外、期限、金额、比例、交叉引用和分点，不得摘要、改写、解释或补充。
+5. opening_anchor 是当前条款的硬开始定位；end_before_anchor 非 null 时是下一结构的开头，source_text 必须在该锚点之前结束，禁止抄入结束锚点及其后内容。end_before_anchor 为 null 时才允许延伸至文件末尾。
+6. 表格使用 Markdown 保持表头、行列关系和脚注。同一条款跨页时合并，page_refs 按升序列出实际页面。
+7. category 使用以下建议值中的最主要类别；无法可靠分类时使用 other：
+   {{CATEGORY_VALUES}}
+8. 不输出 clause_id、sequence、reason、status、confidence 或任何 Schema 外字段。
+
+【全部已复核提取单元（用于确认相邻边界）】
+{{CLAUSE_UNITS}}
+
+【当前单元】
+{{CURRENT_UNIT}}
+
+只抽取当前单元，不重复相邻单元。输出必须符合提供的 JSON Schema，不要输出 Markdown。

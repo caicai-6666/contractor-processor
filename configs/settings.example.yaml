@@ -1,0 +1,56 @@
+# 可提交的项目配置模板。密钥仅通过 .env 中的环境变量提供。
+# vLLM 通常每个服务进程加载一个模型，因此三个能力默认使用不同端口。
+
+models:
+  mllm:
+    provider: vllm
+    base_url: http://127.0.0.1:8000/v1
+    api_key_env: VLLM_MLLM_API_KEY
+    model: REPLACE_WITH_VL_MODEL
+    endpoint: chat_completions
+    timeout_seconds: 300
+    # 必须与 vLLM 的 --max-model-len 保持一致；当前 Instruct 服务示例使用 65536。
+    context_window_tokens: 65536
+    generation:
+      # Qwen3-VL Instruct 的采样参数；实际部署其他模型时应按其推荐配置同步调整。
+      temperature: 0.7
+      top_p: 0.8
+      top_k: 20
+      presence_penalty: 1.5
+      repetition_penalty: 1.0
+      seed: 3407
+      max_completion_tokens: 8192
+    vision:
+      max_pages_per_request: 5
+
+  embedding:
+    provider: vllm
+    base_url: http://127.0.0.1:8001/v1
+    api_key_env: VLLM_EMBEDDING_API_KEY
+    # 替换为已在对应 vLLM 服务加载的嵌入模型名称。
+    model: REPLACE_WITH_EMBEDDING_MODEL
+    endpoint: embeddings
+    timeout_seconds: 60
+    batch_size: 32
+    normalize: true
+
+  reranker:
+    provider: vllm
+    base_url: http://127.0.0.1:8002/v1
+    api_key_env: VLLM_RERANKER_API_KEY
+    # 替换为已在对应 vLLM 服务加载的 score/rerank 模型名称。
+    model: REPLACE_WITH_RERANKER_MODEL
+    endpoint: rerank
+    timeout_seconds: 60
+    candidate_limit: 20
+    top_n: 5
+
+paths:
+  input_contracts: data/input
+  core_fields: description/fields/core/core.yaml
+  attribute_fields: description/fields/attribute/attribute.yaml
+  runtime_data: data
+
+processing:
+  # 默认逐页在内存中渲染并直接发送给 MLLM；仅排障时才持久化页面图像。
+  persist_page_artifacts: false
