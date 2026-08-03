@@ -1,0 +1,481 @@
+schema_version: "1.1"
+field_set: core
+status: draft
+value_envelope:
+  non_object: "{raw_value: string|null, reason: string, status: found|not_found|ambiguous|conflicting|not_applicable, value: typed|null}"
+  object: "{status: application-derived, properties: {child: {raw_value: string|null, reason: string, status: found|not_found|ambiguous|conflicting|not_applicable|out_of_scope, value: typed|null}}}"
+fields:
+  - field_id: contract_title
+    name: 合同名称
+    meaning: 合同首页、标题页或正文中明确标示的正式名称。
+    aliases: [合同名称, 合同标题, 协议名称, 文件名称]
+    not_meaning: [附件名称, 项目名称, 合同编号, 模型概括的合同主题]
+    output:
+      type: string
+      format: 保留正文正式标题，不从文件名补全
+      nullable: true
+      example: 设备采购合同
+    extraction_rule: 优先提取首页或正文标题中独立呈现的正式名称；没有正式标题时输出 not_found，不以 PDF 文件名或模型概括替代。
+    examples:
+      - source_text: 设备采购合同
+        output: 设备采购合同
+
+  - field_id: contract_number
+    name: 合同编号
+    meaning: 当前合同自身明确标注的合同号、协议号或具有同等作用的编号；该业务字段可能缺失，不承担文档唯一标识职责。
+    aliases: [合同编号, 合同号, 协议编号, 协议号]
+    not_meaning: [原合同编号, 项目编号, 发票号码, 订单号, 统一社会信用代码]
+    output:
+      type: string
+      format: 保留原始字母、数字、连接符及前导零
+      nullable: true
+      example: "HT-2025-001"
+    extraction_rule: 只提取明确属于当前文书的合同或协议编号；补充协议引用的原合同编号进入 related_contract_numbers，订单号默认作为 Attribute 候选。未找到、归属不明或存在冲突时应如实输出对应失败状态和 null，不得使用文件名、项目编号、原合同编号或示例值补全；文档唯一标识由程序根据原始 PDF 文件字节计算。
+    examples:
+      - source_text: "合同编号：HT-2025-001"
+        output: "HT-2025-001"
+
+  - field_id: document_role
+    name: 合同文书角色
+    meaning: 当前文书在一组相关合同文件中的法律或业务角色。
+    aliases: [补充协议, 变更协议, 订单, 续签协议, 终止协议, 主合同]
+    not_meaning: [交易类型, 合同标题, 项目阶段]
+    output:
+      type: enum
+      format: "main_contract | supplementary_agreement | amendment | order | renewal | termination | memorandum | other"
+      values:
+        main_contract: 独立主合同或普通确定性合同
+        supplementary_agreement: 对已有合同作补充约定的协议
+        amendment: 对已有合同内容作变更的协议
+        order: 订单或框架协议项下订单
+        renewal: 对已有合同续期或续签的协议
+        termination: 终止或解除已有合同的协议
+        memorandum: 备忘录或会议纪要类双方文件
+        other: 有明确文书角色但不属于以上类型
+      nullable: true
+      example: supplementary_agreement
+    extraction_rule: 根据标题及正文对当前文书性质的明确描述分类；普通独立合同归为 main_contract。无法确认文书关系时输出 ambiguous，不因出现“补充”字样就推断。
+    examples:
+      - source_text: "《设备采购合同》之补充协议（二）"
+        output: supplementary_agreement
+
+  - field_id: related_contract_numbers
+    name: 关联合同编号
+    meaning: 当前文书明确引用的主合同、原合同或其他被关联合同的编号。
+    aliases: [原合同编号, 主合同编号, 关联协议编号, 框架协议编号]
+    not_meaning: [当前合同编号, 项目编号, 订单编号]
+    output:
+      type: array
+      format: "[string]，按首次出现顺序去重并保留原始格式"
+      nullable: true
+      items:
+        name: 被关联合同编号
+        meaning: 当前文书明确引用的一个主合同、原合同或被承接合同编号
+        type: string
+        nullable: false
+        not_meaning: [当前文书自身编号, 项目编号, 发票编号, 无合同关系的订单编号]
+        extraction_rule: 保留原始字母、数字、连接符和前导零；按首次出现顺序去重。
+      example: ["HT-2025-001"]
+    extraction_rule: 仅提取明确表示与当前文书存在承接、补充、变更或从属关系的合同编号；当前合同自身编号不得重复写入。
+    examples:
+      - source_text: "鉴于双方于2025年1月3日签订《设备采购合同》（编号HT-2025-001）"
+        output: ["HT-2025-001"]
+
+  - field_id: transaction_type
+    name: 交易类型
+    meaning: 不依赖任一方观察视角、根据主要交易对象与义务归类的业务类型。
+    aliases: [合同类别, 协议类型, 交易性质]
+    not_meaning: [销售方视角, 采购方视角, 框架协议, 补充协议]
+    output:
+      type: enum
+      format: "goods | service | goods_and_service | technology | lease | construction | employment | finance | license | other"
+      values:
+        goods: 以货物、材料、产品或设备转移为主要交易
+        service: 以提供服务成果或持续服务为主要交易
+        goods_and_service: 货物与服务均构成独立主要义务
+        technology: 技术开发、技术转让、技术咨询或技术服务
+        lease: 租赁、出租或承租资产
+        construction: 建设工程、施工或工程承包
+        employment: 劳动、劳务用工或人员聘用
+        finance: 借款、担保、融资或其他金融交易
+        license: 知识产权或软件许可使用
+        other: 主要交易明确但不属于以上类型
+      nullable: true
+      example: goods
+    extraction_rule: 结合标的和主要权利义务分类；设备并附带安装调试等从属服务通常归 goods，货物与服务均为独立主要义务时归 goods_and_service。无法可靠分类时输出 other 并保留原始依据。
+    examples:
+      - source_text: 乙方向甲方提供加热台设备及随附安装调试
+        output: goods
+
+  - field_id: contract_form
+    name: 合同形态
+    meaning: 当前合同是确定交易、框架安排还是其他组织交易的形态。
+    aliases: [框架合同, 框架协议, 单项合同, 采购订单]
+    not_meaning: [交易类型, 合同文书角色, 付款方式]
+    output:
+      type: enum
+      format: "definitive | framework | master | call_off | other"
+      values:
+        definitive: 已确定主要交易对象、数量或计价方式的具体合同
+        framework: 仅建立合作规则，具体交易以后续订单或协议确定
+        master: 统领多个从属协议或执行文件的主协议
+        call_off: 主协议或框架协议项下的具体执行合同
+        other: 合同形态明确但不属于以上类型
+      nullable: true
+      example: framework
+    extraction_rule: 普通一次性或确定性交易归 definitive；仅建立合作规则、数量金额以后续订单确定的归 framework；主协议及其项下具体执行文件分别使用 master 和 call_off。
+    examples:
+      - source_text: 本协议仅约定年度合作框架，具体数量以双方确认的订单为准
+        output: framework
+
+  - field_id: contract_parties
+    name: 合同相关方
+    meaning: 合同中明确作为交易、签署或权利义务主体的组织或个人，以及其原文身份和可证实的规范化身份。
+    aliases: [合同主体, 合同当事人, 甲方, 乙方, 丙方, 需方, 供方, 买方, 卖方, 委托方, 受托方, 发包方, 承包方, 出租方, 承租方]
+    not_meaning: [联系人, 委托代表, 项目负责人, 收款银行, 开户行, 制造商, 收货人]
+    output:
+      type: array
+      format: "[{source_name: string, normalized_name: string|null, source_designation: string|null, business_role: buyer|seller|service_provider|service_recipient|lessor|lessee|employer|contractor|licensor|licensee|other|null, unified_social_credit_code: string|null}]"
+      nullable: true
+      min_items: 1
+      items:
+        type: object
+        nullable: false
+        required:
+          - source_name
+          - normalized_name
+          - source_designation
+          - business_role
+          - unified_social_credit_code
+        additional_properties: false
+        properties:
+          source_name:
+            name: 原文主体名称
+            meaning: 合同中直接记载的组织或个人完整名称
+            type: string
+            nullable: false
+            not_meaning: [联系人, 法定代表人, 委托代表, 开户行, 收货人]
+            extraction_rule: 忠实保留当前合同原文，不根据文件名或外部知识补全。
+          normalized_name:
+            name: 规范化主体名称
+            meaning: 对 source_name 做确定性字符和公司全称规范化后的名称
+            type: string
+            nullable: true
+            extraction_rule: 只处理空白、全半角和合同内明确的简称至全称映射；证据不足时为 null。
+          source_designation:
+            name: 原文主体称谓
+            meaning: 当前合同赋予该主体的甲方、需方、供方等原文称谓
+            type: string
+            nullable: true
+            not_meaning: [模型推断的买方或卖方]
+            extraction_rule: 必须逐字保留原文；没有明确称谓时为 null。
+          business_role:
+            name: 规范化业务角色
+            meaning: 根据合同标的和主要权利义务确定的主体业务角色
+            type: enum
+            nullable: true
+            values:
+              buyer: 购买或受让货物的一方
+              seller: 出售或交付货物的一方
+              service_provider: 提供服务的一方
+              service_recipient: 接受服务的一方
+              lessor: 出租方
+              lessee: 承租方
+              employer: 发包、委托或用工一方
+              contractor: 承包、受托或履行工作的一方
+              licensor: 许可方
+              licensee: 被许可方
+              other: 有明确业务角色但不属于以上类型
+            extraction_rule: 仅根据明确义务分类，不得按甲乙方顺序或合同标题猜测。
+          unified_social_credit_code:
+            name: 统一社会信用代码
+            meaning: 与当前主体明确对应的18位统一社会信用代码
+            type: string
+            nullable: true
+            pattern: "^[0-9A-Z]{18}$"
+            not_meaning: [合同编号, 纳税人识别号以外的账号, 其他主体信用代码]
+            extraction_rule: 必须能在当前合同中与该主体可靠对应；统一转为大写。
+      example:
+        - {source_name: 示例科技有限公司, normalized_name: 示例科技有限公司, source_designation: 需方, business_role: buyer, unified_social_credit_code: null}
+    extraction_rule: source_name 与 source_designation 必须忠实保留原文。normalized_name 只允许做空白、全半角及明确公司全称的规范化，不得凭外部知识补全。business_role 仅在标的和权利义务能够直接证实时归一化，不能按甲乙方顺序猜测。统一社会信用代码必须与该主体明确对应。raw_value 必须覆盖各主体的原文名称和称谓。
+    examples:
+      - source_text: "需方：示例科技有限公司；供方：示例设备有限公司"
+        output:
+          - {source_name: 示例科技有限公司, normalized_name: 示例科技有限公司, source_designation: 需方, business_role: buyer, unified_social_credit_code: null}
+          - {source_name: 示例设备有限公司, normalized_name: 示例设备有限公司, source_designation: 供方, business_role: seller, unified_social_credit_code: null}
+
+  - field_id: signing_date
+    name: 签订日期
+    meaning: 合同正文或签署页明确记载的统一签订日期。
+    aliases: [签订日期, 签约日期, 订立日期, 签署日期, 合同日期]
+    not_meaning: [生效日期, 合同期限起始日, 交货日期, 文件打印日期]
+    output:
+      type: date
+      format: YYYY-MM-DD
+      nullable: true
+      example: "2025-04-03"
+    extraction_rule: 优先使用明确标注的合同签订或签署日期；仅有各方不同落款日期时输出 conflicting、value 为 null，并在当前字段的 reason 中简述候选日期，不擅自选取。
+    examples:
+      - source_text: "签订日期：2025年4月3日"
+        output: "2025-04-03"
+
+  - field_id: effective_mechanism
+    name: 生效机制
+    meaning: 合同开始发生效力的明确日期、触发条件及能够可靠得到的规范化生效日期。
+    aliases: [生效日期, 合同生效日, 自…起生效, 签字盖章后生效]
+    not_meaning: [履约开始日期, 交付日期, 到期日期, 签订日期本身]
+    output:
+      type: object
+      format: "{date: date|null, trigger_type: explicit_date|on_signing|on_signing_and_seal|on_last_signature|on_seal|on_payment|on_approval|on_condition|unknown, trigger_text: string|null}"
+      nullable: true
+      required: [date, trigger_type, trigger_text]
+      additional_properties: false
+      properties:
+        date:
+          name: 规范化生效日期
+          meaning: 合同明确写明或依据无歧义生效规则可靠得到的日期
+          type: date
+          format: YYYY-MM-DD
+          nullable: true
+          not_meaning: [签订日期本身, 履约开始日期, 交付日期]
+          extraction_rule: 明确日期直接提取；只有生效规则与唯一签订日期可确定组合时才能派生，否则为 null。签字并盖章、付款、审批或其他条件的完成日期必须由生效条款原文直接支撑，不得把合同签订日期当作条件完成日期。
+        trigger_type:
+          name: 生效触发类型
+          meaning: 合同约定开始生效的事件或条件类型
+          type: enum
+          nullable: false
+          values:
+            explicit_date: 原文明示具体生效日期
+            on_signing: 双方或约定主体完成签字后生效
+            on_signing_and_seal: 双方或约定主体完成签字并盖章后生效
+            on_last_signature: 最后一方完成签署后生效
+            on_seal: 完成盖章后生效
+            on_payment: 收到或支付约定款项后生效
+            on_approval: 获得审批、备案或许可后生效
+            on_condition: 满足其他明确条件后生效
+            unknown: 存在生效表述但触发类型无法可靠归类
+          not_meaning: [签名或盖章在版面上的视觉存在, 签署区域的排版, 合同惯例或默认生效规则]
+          extraction_rule: 只有合同可见文字明确表述生效事件或条件时才能选择对应类型；仅看见签名、印章或签署区域不得推断生效机制。raw_value 必须摘录支撑分类的生效条件原文，不能填写 on_signing 等枚举代码。同时要求签字和盖章时使用 on_signing_and_seal，不得只归为 on_signing 或 on_seal。
+        trigger_text:
+          name: 生效条件原文
+          meaning: 支撑生效日期或触发类型的最小必要原文
+          type: string
+          nullable: true
+          not_meaning: [签署页主体名称, 法定代表人或代理人栏, 手写签名, 印章图像]
+          extraction_rule: 忠实保留合同文字明确写出的生效条件；签署区的主体、代表人、签名和印章不是生效条件原文。只有孤立具体日期且无额外条件时也应保留对应日期原文。
+      example: {date: "2025-04-03", trigger_type: explicit_date, trigger_text: 本合同自2025年4月3日起生效}
+    extraction_rule: 原文明确日期时直接提取。原文约定签订之日起生效且 signing_date 唯一明确时，可将相同日期写入 date；签字盖章、付款、审批等条件未能确定完成日期时保留 trigger_type 和 trigger_text，date 为 null，不得丢弃生效条件。生效机制必须有可逐字核对的生效条款；不得仅根据签名、盖章、签署区版式、文件名或合同惯例推断默认生效规则。
+    examples:
+      - source_text: 本合同自双方签字盖章之日起生效
+        output: {date: null, trigger_type: on_signing_and_seal, trigger_text: 本合同自双方签字盖章之日起生效}
+
+  - field_id: contract_validity_period
+    name: 合同有效期
+    meaning: 合同整体法律效力或整体合作关系的起止日期、截止日期或相对期间。
+    aliases: [合同期限, 合同有效期, 协议有效期, 合作期限]
+    not_meaning: [交货期, 服务完成期限, 施工工期, 付款账期, 质保期, 报价有效期, 保密期限]
+    output:
+      type: object
+      format: "{start_date: date|null, end_date: date|null, duration_text: string|null, auto_renewal: boolean|null}"
+      nullable: true
+      required: [start_date, end_date, duration_text, auto_renewal]
+      additional_properties: false
+      properties:
+        start_date:
+          name: 合同有效期起始日
+          meaning: 合同整体有效期或整体合作期的规范化开始日期
+          type: date
+          format: YYYY-MM-DD
+          nullable: true
+          not_meaning: [签订日期本身, 生效日期本身, 交货开始日, 服务开始日, 开工日]
+          extraction_rule: 只提取合同明确界定的整体有效期端点。签订日期或生效日期本身不能作为 start_date，除非原文明示该日期同时是整体有效期或整体合作期起点；相对条件无法换算时为 null。
+        end_date:
+          name: 合同有效期截止日
+          meaning: 合同整体有效期或整体合作期的规范化结束日期
+          type: date
+          format: YYYY-MM-DD
+          nullable: true
+          not_meaning: [交货截止日, 服务完成日, 竣工日, 质保截止日]
+          extraction_rule: 只提取整体有效期端点；无明确截止日期时为 null。
+        duration_text:
+          name: 合同有效期原文期间
+          meaning: 无法可靠换算为确定起止日的合同整体相对期间
+          type: string
+          nullable: true
+          not_meaning: [货期, 工期, 付款账期, 质保期, 保密期]
+          extraction_rule: 仅保留合同整体期限的相对表述；已有完整确定起止日期时通常为 null。
+        auto_renewal:
+          name: 是否自动续期
+          meaning: 合同期满后是否依原合同约定自动延续
+          type: boolean
+          nullable: true
+          not_meaning: [双方另行协商续签, 单方可申请续约]
+          extraction_rule: 原文明示自动续期填 true，明示不自动续期填 false，未提及则为 null。
+      example: {start_date: "2025-01-01", end_date: "2025-12-31", duration_text: null, auto_renewal: false}
+    extraction_rule: 只抽取合同整体有效期或整体合作期。签订日期、生效日期、货期、服务期、施工期等不得直接写入本字段；只有合同原文明确把某日期定义为整体有效期端点时才可采用。相对期间无法可靠换算时保留 duration_text；自动续期只有原文明确时才填写。
+    examples:
+      - source_text: 合同有效期自2025年1月1日至2025年12月31日，期满不自动续期
+        output: {start_date: "2025-01-01", end_date: "2025-12-31", duration_text: null, auto_renewal: false}
+
+  - field_id: contract_amount
+    name: 合同金额
+    meaning: 合同明确约定的总体交易金额及其价格、币种和税务口径。
+    aliases: [合同总金额, 合同价款, 合同总价, 含税总价, 暂定总价, 最高限价]
+    not_meaning: [单价, 预付款金额, 已付款金额, 违约金, 发票金额]
+    output:
+      type: object
+      format: "{amount: number|null, currency: string|null, amount_type: fixed_total|estimated|ceiling|settlement_based|unit_price_only|framework_no_total|unknown, tax_included: boolean|null, tax_rate: number|null, source_amount_text: string|null}"
+      nullable: true
+      required:
+        - amount
+        - currency
+        - amount_type
+        - tax_included
+        - tax_rate
+        - source_amount_text
+      additional_properties: false
+      properties:
+        amount:
+          name: 采用的合同总金额
+          meaning: 依据 amount_type 确定的合同级总额
+          type: number
+          nullable: true
+          minimum: 0
+          not_meaning: [单价, 预付款, 已付款, 违约金, 发票金额]
+          extraction_rule: 原文明示“合同总价”“含税总金额”“不含税总金额”“暂定总价”或“最高限价”等合同级字段时，优先忠实提取其数值，不得用模型计算值替代，也不得因另有税务字段而忽略。fixed_total、estimated 或 ceiling 时填写相应总额；据实结算、仅单价或框架无总额时为 null。
+        currency:
+          name: 币种
+          meaning: amount 使用的币种
+          type: string
+          format: ISO-4217 三字母大写代码
+          nullable: true
+          pattern: "^[A-Z]{3}$"
+          extraction_rule: 人民币规范化为 CNY；不得仅凭合同语言或主体所在地推断。
+        amount_type:
+          name: 金额性质
+          meaning: 当前合同总金额的确定方式和口径
+          type: enum
+          nullable: false
+          values:
+            fixed_total: 明确且固定的合同总价
+            estimated: 暂定、预计或估算总价
+            ceiling: 最高限价或不超过金额
+            settlement_based: 按实际发生量、验收量或结算规则据实结算
+            unit_price_only: 仅约定单价且无法确定合同总额
+            framework_no_total: 框架合同明确未约定总额
+            unknown: 存在合同级金额但性质无法可靠判断
+          extraction_rule: 必须先判断金额性质，再决定 amount 是否填写。
+        tax_included:
+          name: 总额是否含税
+          meaning: amount 是否明确包含适用税费
+          type: boolean
+          nullable: true
+          extraction_rule: 原文字段或表头明示“含税”“价税合计”时填 true，明示“不含税”“未税”时填 false，以原文标注为准；不得用计算结果覆盖明示属性，也不能从是否开票间接推断。
+        tax_rate:
+          name: 税率
+          meaning: 与当前合同金额属于同一交易和计价口径的增值税税率
+          type: number
+          nullable: true
+          unit: percent
+          minimum: 0
+          maximum: 100
+          not_meaning: [其他商品税率, 历史发票税率, 附加税率]
+          extraction_rule: 输出13表示13%而不是0.13；原文明示税率时必须优先忠实提取，不得因金额算术结果不吻合而丢弃或改写。原文未给税率时，只有含税金额与未税金额覆盖完全相同的商品、服务和价外费用，且两项输入都在合同中明确出现时才允许计算；费用范围不同或不明确时禁止反推隐含税率。
+        source_amount_text:
+          name: 合同金额原文
+          meaning: 同时保留大小写金额、金额性质及用于判断计价口径的费用组成原文
+          type: string
+          nullable: true
+          extraction_rule: 不做解释性改写；合同明确列示的金额字段、字段名或表头及其数值必须一并保留，包括含税价、未税价和费用组成，即使该金额没有独立 Core 子字段。大小写金额同时出现时一并保留；原文提及运费、保险费、服务费等费用组成时必须一并保留，以便审计金额和税率判断。
+      example: {amount: 100000.00, currency: CNY, amount_type: fixed_total, tax_included: true, tax_rate: 13, source_amount_text: 人民币壹拾万元整}
+    extraction_rule: 原文优先于计算和推断。提取当前字段时必须逐条核对合同理解条目中的金额与费用原文清单，并回到合同图像复核；每一个计算输入都必须同时得到该清单和图像支持。先逐项检查合同中的明确金额字段、表头和对应数值，再判断金额性质并抽取；原文明示的合同总价、含税属性和税率必须忠实提取，不得因无法复算或算术不吻合而遗漏或改写。框架无总额、仅单价或据实结算时保留 amount_type，amount 为 null，不以预算、单价或付款阶段金额替代。未税价格、未税总额和不含税总价不再作为独立 Core 子字段输出，但相关原文必须保留在 source_amount_text 中。只有原文未明示税率且含税、未税金额范围完全一致时才允许计算 tax_rate；不得计算或输出税额。大小写金额或多个同口径总额冲突时只将受影响的直属子字段输出 conflicting，不擅自选择。
+    examples:
+      - source_text: 合同含税总价为人民币100,000.00元（大写：壹拾万元整），税率13%
+        output: {amount: 100000.00, currency: CNY, amount_type: fixed_total, tax_included: true, tax_rate: 13, source_amount_text: 人民币100,000.00元（大写：壹拾万元整）}
+      - source_text: 合同总价（含税）113,000.00元；合同总价（不含税）100,000.00元；增值税税率13%
+        output: {amount: 113000.00, currency: CNY, amount_type: fixed_total, tax_included: true, tax_rate: 13, source_amount_text: 合同总价（含税）113,000.00元；合同总价（不含税）100,000.00元；增值税税率13%}
+
+  - field_id: subject_matter
+    name: 合同标的
+    meaning: 合同交易、交付或服务的核心对象，以及用于稳定检索的受控分类和原文项目名称。
+    aliases: [标的, 合同标的, 采购内容, 服务内容, 产品名称, 项目内容]
+    not_meaning: [合同名称, 交付地点, 单价, 附件名称]
+    output:
+      type: object
+      format: "{summary: string, categories: [goods|service|software|equipment|material|construction|technology|license|lease|finance|other], items: [{source_name: string, normalized_name: string|null, brand: string|null, model: string|null}]|null}"
+      nullable: true
+      required: [summary, categories, items]
+      additional_properties: false
+      properties:
+        summary:
+          name: 标的摘要
+          meaning: 对合同核心交易对象的最小必要准确概括
+          type: string
+          nullable: false
+          extraction_rule: 只概括主要标的，不加入交付、付款或质量条款，不使用合同标题替代。
+        categories:
+          name: 标的受控分类
+          meaning: 支持稳定检索的一个或多个标的类别
+          type: array
+          nullable: false
+          min_items: 1
+          items:
+            name: 标的分类
+            meaning: 单个受控标的类别
+            type: enum
+            nullable: false
+            values:
+              goods: 货物或产品
+              service: 服务
+              software: 软件产品或系统
+              equipment: 设备
+              material: 原材料或耗材
+              construction: 工程施工
+              technology: 技术开发、转让、咨询或服务
+              license: 知识产权或软件许可
+              lease: 租赁资产
+              finance: 金融或融资标的
+              other: 不属于以上类型的明确标的
+            extraction_rule: 只能选择受控值，不得即时创造新分类。
+        items:
+          name: 主要标的项目
+          meaning: 合同中可清晰识别、对检索有价值的主要产品、设备、软件或服务项目
+          type: array
+          nullable: true
+          items:
+            type: object
+            nullable: false
+            required: [source_name, normalized_name, brand, model]
+            additional_properties: false
+            properties:
+              source_name:
+                name: 项目原文名称
+                meaning: 合同清单或标的条款直接记载的项目名称
+                type: string
+                nullable: false
+                extraction_rule: 忠实保留原文，不把型号或数量改写进名称。
+              normalized_name:
+                name: 项目规范名称
+                meaning: 有当前合同证据支持的通用产品或服务名称
+                type: string
+                nullable: true
+                extraction_rule: 无可靠通用名称时为 null，不借助外部知识扩写。
+              brand:
+                name: 品牌
+                meaning: 与该项目明确对应、由合同原文直接记载的品牌或厂牌
+                type: string
+                nullable: true
+                not_meaning: [生产厂家, 供应商, 项目名称, 规格型号]
+                extraction_rule: 仅在合同原文明示品牌或厂牌且能与当前项目可靠对应时填写；不得依据型号、生产厂家、供应商名称或外部知识推断品牌，无明确品牌时为 null。
+              model:
+                name: 规格型号
+                meaning: 与该项目明确对应的产品型号或规格标识
+                type: string
+                nullable: true
+                not_meaning: [数量, 单价, 项目编号]
+                extraction_rule: 型号必须与当前项目可靠对应；无型号时为 null。
+      example: {summary: 加热台设备采购, categories: [goods, equipment], items: [{source_name: Hei-VAP加热台, normalized_name: 加热台, brand: null, model: Hei-VAP}]}
+    extraction_rule: summary 保留最小必要准确概括；categories 只能从受控枚举中选择，可多选；items 保留主要项目而非穷举附件，source_name 忠实于原文，normalized_name 只能做有证据支持的通用名称归一化；品牌仅在原文明示时写入 brand，不得根据厂家、供应商或型号推断；型号独立写入 model。
+    examples:
+      - source_text: 乙方向甲方提供Hei-VAP加热台设备及随附安装调试
+        output: {summary: Hei-VAP加热台设备采购及随附安装调试, categories: [goods, equipment, service], items: [{source_name: Hei-VAP加热台设备, normalized_name: 加热台, brand: null, model: Hei-VAP}]}

@@ -1,6 +1,8 @@
 """Clause 结构发现、边界整理、复核、抽取与前缀复用回归测试。"""
 
+import asyncio
 import importlib.util
+import shutil
 import sys
 from pathlib import Path
 
@@ -9,13 +11,23 @@ import pytest
 from pydantic import ValidationError
 import yaml
 
+from contract_processor.infrastructure.extraction.validated_pipelines import (
+    ValidatedExtractionPipelines,
+)
+from contract_processor.settings import load_project_settings
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-CLAUSE_RUN_PATH = PROJECT_ROOT / "experiments/clause_extraction/run.py"
-CORE_RUN_PATH = PROJECT_ROOT / "experiments/core_field_extraction/run.py"
-PROMPT_ROOT = PROJECT_ROOT / "experiments/clause_extraction/prompts"
-SHARED_PREFIX_PATH = PROJECT_ROOT / "experiments/prompts/00_contract_pdf_common_prefix.txt"
-CLAUSE_SPEC_PATH = PROJECT_ROOT / "description/fields/clause/clause.yaml"
+EXTRACTION_ROOT = PROJECT_ROOT / "src/contract_processor/infrastructure/extraction"
+CLAUSE_RUN_PATH = EXTRACTION_ROOT / "clause/pipeline.py"
+CORE_RUN_PATH = EXTRACTION_ROOT / "core/pipeline.py"
+SUMMARY_RUN_PATH = EXTRACTION_ROOT / "abstract/pipeline.py"
+PROMPT_ROOT = EXTRACTION_ROOT / "clause/prompts"
+SHARED_PREFIX_PATH = (
+    PROJECT_ROOT
+    / "src/contract_processor/application/prompts/templates/00_contract_pdf_common_prefix.txt"
+)
+CLAUSE_SPEC_PATH = PROJECT_ROOT / "data/definitions/clause.yaml"
 
 
 def load_experiment_module(path: Path, name: str):
@@ -71,23 +83,55 @@ def test_step1_schema_is_structural_and_allows_empty_map() -> None:
     ]
 
 
-def test_core_and_all_clause_stages_use_identical_multimodal_prefix() -> None:
+def test_all_business_lines_use_identical_multimodal_prefix() -> None:
     clause = load_clause_experiment()
     core = load_experiment_module(CORE_RUN_PATH, "core_prefix_experiment")
-    common_prefix = SHARED_PREFIX_PATH.read_text(encoding="utf-8").strip()
+    summary = load_experiment_module(SUMMARY_RUN_PATH, "summary_prefix_experiment")
+    common_prefix = asyncio.run(core.build_common_prefix(1))
     images = [{"data_url": "data:image/png;base64,AA=="}]
 
     core_messages = core.messages_for(common_prefix, images, "Core 任务")
-    for suffix in (
-        "Clause Step 1",
-        "Clause Step 1B",
-        "Clause Step 2",
-        "Clause Step 3",
-    ):
-        clause_messages = clause.messages_for(common_prefix, images, suffix)
-        assert clause.SYSTEM_MESSAGE == core.SYSTEM_MESSAGE
-        assert clause_messages[0] == core_messages[0]
-        assert clause_messages[1]["content"][:-1] == core_messages[1]["content"][:-1]
+    line_messages = [
+        clause.messages_for(common_prefix, images, suffix)
+        for suffix in (
+            "Clause Step 1",
+            "Clause Step 1B",
+            "Clause Step 2",
+            "Clause Step 3",
+        )
+    ] + [summary.messages_for(common_prefix, images, "摘要任务")]
+    for messages in line_messages:
+        assert clause.SYSTEM_MESSAGE == core.SYSTEM_MESSAGE == summary.SYSTEM_MESSAGE
+        assert messages[0] == core_messages[0]
+        assert messages[1]["content"][:-1] == core_messages[1]["content"][:-1]
+    assert "页面可见范围" in common_prefix
+
+
+def test_prompt_version_changes_when_prompt_content_changes(tmp_path: Path) -> None:
+    from contract_processor.application.prompts.pdf_prefix import compute_prompt_version
+
+    source_package = PROJECT_ROOT / "src/contract_processor"
+    copied_package = tmp_path / "src/contract_processor"
+    shutil.copytree(
+        source_package / "application/prompts",
+        copied_package / "application/prompts",
+    )
+    shutil.copytree(
+        source_package / "infrastructure/extraction",
+        copied_package / "infrastructure/extraction",
+    )
+    prompt_path = (
+        copied_package
+        / "infrastructure/extraction/core/prompts/01_understand_contract.txt"
+    )
+    first = asyncio.run(compute_prompt_version(tmp_path))
+    prompt_path.write_text(
+        prompt_path.read_text(encoding="utf-8") + "\n版本二",
+        encoding="utf-8",
+    )
+    second = asyncio.run(compute_prompt_version(tmp_path))
+
+    assert first != second
 
 
 def test_final_clause_schema_still_has_only_five_fields() -> None:
@@ -109,6 +153,17 @@ def test_final_clause_schema_still_has_only_five_fields() -> None:
             source_text="甲方应按约付款。",
             page_refs=[2],
         )
+
+
+def test_contract_level_clause_result_requires_sha256_document_id() -> None:
+    experiment = load_clause_experiment()
+
+    result = experiment.ClauseExtraction(document_id="a" * 64, clauses=[])
+
+    assert result.document_id == "a" * 64
+    assert result.clauses == []
+    with pytest.raises(ValidationError):
+        experiment.ClauseExtraction(document_id="HT-001", clauses=[])
 
 
 def test_structure_map_validation_checks_page_order() -> None:
@@ -581,7 +636,7 @@ def test_heading_validation_is_conditional_on_heading_source() -> None:
     ) == []
     own_unit = inherited_unit.model_copy(update={"heading_source": "own"})
     errors = experiment.validate_clause_unit_extraction(extraction, own_unit, 1, unit_index=1)
-    assert any("标题字符之间允许空白" in error for error in errors)
+    assert any("仅忽略排版空白与 Unicode 标点" in error for error in errors)
 
 
 def test_own_heading_validation_ignores_unicode_whitespace() -> None:
@@ -610,6 +665,38 @@ def test_own_heading_validation_ignores_unicode_whitespace() -> None:
 
     assert experiment.validate_clause_unit_extraction(
         extraction, unit, 1, unit_index=5
+    ) == []
+
+
+def test_own_heading_validation_ignores_bilingual_separator_punctuation() -> None:
+    experiment = load_clause_experiment()
+    unit = experiment.ResolvedClauseUnit(
+        source_candidate_indices=[10],
+        clause_number=None,
+        heading="质量标准及责任限制 Quality Standards And Limitation Of Liability",
+        heading_source="own",
+        opening_anchor="质量标准及责任限制： Quality Standards And Limitation Of Liability:",
+        page_refs=[1],
+    )
+    extraction = experiment.ClauseUnitExtraction.model_validate(
+        {
+            "clauses": [
+                {
+                    "clause_number": None,
+                    "heading": unit.heading,
+                    "category": "quality",
+                    "source_text": (
+                        "质量标准及责任限制： Quality Standards And Limitation Of "
+                        "Liability:供方按约提供产品。"
+                    ),
+                    "page_refs": [1],
+                }
+            ]
+        }
+    )
+
+    assert experiment.validate_clause_unit_extraction(
+        extraction, unit, 1, unit_index=6
     ) == []
 
 
@@ -647,7 +734,6 @@ def test_unit_validation_rejects_wrong_start_and_swallowed_next_clause() -> None
 
 
 def test_entire_pdf_renderer_rejects_truncation(tmp_path: Path) -> None:
-    experiment = load_clause_experiment()
     pdf_path = tmp_path / "two-pages.pdf"
     document = fitz.open()
     document.new_page()
@@ -655,8 +741,12 @@ def test_entire_pdf_renderer_rejects_truncation(tmp_path: Path) -> None:
     document.save(pdf_path)
     document.close()
 
-    with pytest.raises(ValueError, match="Clause 实验不会截断合同"):
-        experiment.render_entire_pdf_as_data_urls(pdf_path, max_pages=1)
+    settings = asyncio.run(load_project_settings(PROJECT_ROOT))
+    settings.models.mllm.vision.max_pages_per_request = 1
+    pipelines = ValidatedExtractionPipelines(PROJECT_ROOT, settings)
+
+    with pytest.raises(ValueError, match="统一工作流不会静默截断合同"):
+        pipelines._render_pdf(pdf_path)
 
 
 def test_clause_catalog_and_four_prompts_are_in_sync() -> None:
@@ -669,7 +759,7 @@ def test_clause_catalog_and_four_prompts_are_in_sync() -> None:
     step2 = (PROMPT_ROOT / "02_review_clause_candidates.txt").read_text(encoding="utf-8")
     step3 = (PROMPT_ROOT / "03_extract_clause_unit.txt").read_text(encoding="utf-8")
 
-    assert spec["schema_version"] == "0.4"
+    assert spec["schema_version"] == "0.5"
     assert list(experiment.ClauseItem.model_json_schema()["properties"]) == list(
         spec["output"]["items"]["properties"]
     )
@@ -687,6 +777,18 @@ def test_clause_catalog_and_four_prompts_are_in_sync() -> None:
     assert "heading_source=inherited" in step3
     assert "end_before_anchor" in step3
     assert "{{CATEGORY_VALUES}}" in step3
+
+
+def test_program_derived_review_location_has_no_arbitrary_length_limit() -> None:
+    experiment = load_clause_experiment()
+
+    projection = experiment.ClauseReviewProjection(
+        candidate_index=1,
+        fused_heading="技术要求",
+        location="长条款定位" * 200,
+    )
+
+    assert len(projection.location) > 400
 
 
 def test_exact_duplicates_are_reported_without_deletion() -> None:

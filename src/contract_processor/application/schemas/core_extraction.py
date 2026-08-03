@@ -122,11 +122,13 @@ def _field_envelope_schema(
             "reason": {
                 "type": "string",
                 "minLength": 1,
-                "maxLength": 160,
+                "maxLength": 400,
                 "description": "基于原文简述当前字段的采用、缺失、冲突或排除理由",
             },
             "status": {"type": "string", "enum": STATUS_VALUES},
-            "value": deepcopy(value_schema),
+            # 即使业务定义不可空，模型仍必须能如实报告缺失或冲突。
+            # nullable=false 由合同级校验解释为“最终可接受结果必须 found”。
+            "value": _nullable_envelope_value_schema(value_schema),
         },
         "required": [
             "raw_value",
@@ -160,12 +162,15 @@ def _property_envelope_schema(
         "properties": {
             "raw_value": {
                 "anyOf": [{"type": "string"}, {"type": "null"}],
-                "description": "当前子字段相关的最小必要合同原文；未发现或不适用时为 null",
+                "description": (
+                    "当前子字段相关的最小必要合同原文；无相关原文时为 null，"
+                    "有相关语境但无可采用值时允许保留原文"
+                ),
             },
             "reason": {
                 "type": "string",
                 "minLength": 1,
-                "maxLength": 160,
+                "maxLength": 400,
                 "description": "基于原文简述当前子字段的采用、缺失、冲突或排除理由",
             },
             "status": {"type": "string", "enum": PROPERTY_STATUS_VALUES},
@@ -178,7 +183,7 @@ def _property_envelope_schema(
 
 
 def _object_field_schema(
-    *, field_id: str, output_definition: dict[str, Any]
+    *, field_id: str, output_definition: dict[str, Any], field_set_name: str
 ) -> dict[str, Any]:
     """对象字段只让模型生成直属子字段；对象总状态由应用层确定性汇总。"""
 
@@ -208,24 +213,28 @@ def _object_field_schema(
         "required": ["properties"],
         "additionalProperties": False,
         "description": (
-            f"Core 对象字段 {field_id} 的直属子字段结果；不得输出对象外层 status，"
+            f"{field_set_name} 对象字段 {field_id} 的直属子字段结果；不得输出对象外层 status，"
             "该状态由应用层根据子字段状态汇总"
         ),
     }
 
 
-def build_core_extraction_schema(core_fields: list[dict[str, Any]]) -> dict[str, Any]:
-    """生成禁止未知键的 Schema；对象字段细化到直属子字段决策包络。"""
+def build_field_extraction_schema(
+    fields: list[dict[str, Any]], *, field_set_name: str
+) -> dict[str, Any]:
+    """为固定字段目录生成禁止未知键的逐字段 Schema。"""
+
     field_properties: dict[str, Any] = {}
-    for field in core_fields:
+    for field in fields:
         field_id = field["field_id"]
         if field_id in field_properties:
-            raise ValueError(f"Core field_id 重复：{field_id}")
+            raise ValueError(f"{field_set_name} field_id 重复：{field_id}")
         output = field["output"]
         if output["type"] == "object":
             field_properties[field_id] = _object_field_schema(
                 field_id=field_id,
                 output_definition=output,
+                field_set_name=field_set_name,
             )
         else:
             field_properties[field_id] = _field_envelope_schema(
@@ -235,7 +244,6 @@ def build_core_extraction_schema(core_fields: list[dict[str, Any]]) -> dict[str,
     return {
         "type": "object",
         "properties": {
-            "document_id": {"type": "string", "minLength": 1},
             "fields": {
                 "type": "object",
                 "properties": field_properties,
@@ -243,6 +251,12 @@ def build_core_extraction_schema(core_fields: list[dict[str, Any]]) -> dict[str,
                 "additionalProperties": False,
             },
         },
-        "required": ["document_id", "fields"],
+        "required": ["fields"],
         "additionalProperties": False,
     }
+
+
+def build_core_extraction_schema(core_fields: list[dict[str, Any]]) -> dict[str, Any]:
+    """兼容 Core 调用方的固定入口。"""
+
+    return build_field_extraction_schema(core_fields, field_set_name="Core")

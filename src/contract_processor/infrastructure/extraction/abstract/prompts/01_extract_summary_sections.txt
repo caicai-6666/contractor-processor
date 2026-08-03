@@ -1,0 +1,50 @@
+你正在直接阅读原始合同 PDF，并一次性提取固定摘要的六个栏目。
+
+通用输出规则：
+- 合同编号、合同标题、主要内容严格按 evidence_text、page_refs、reason、status、summary_text 的顺序输出。
+- 相关方、时间、关键履约约定严格按 evidence_text、page_refs、reason、status、summary_items 的顺序输出；相关方项是 role/name 对象，时间和关键履约约定项是 type/text 对象。
+- 必须先定位 PDF 图像中可见的最小必要原文和物理页码，再写简明 reason，最后确定 status 与摘要内容。
+- status 只能是 found、not_found、ambiguous、conflicting、not_applicable。
+- found 时 evidence_text、page_refs 和对应摘要字段均不能为空；摘要只能压缩证据，不得增加证据中不存在的数字、日期、比例、主体、地点、条件或法律结论。
+- not_found/not_applicable 时 summary_text 或 summary_items 必须为 null；没有相关原文时 evidence_text 为 null、page_refs 为空。
+- ambiguous/conflicting 时摘要字段必须为 null，并在 evidence_text 中保留相关候选原文及页码。
+- evidence_text 必须是页面中可直接核对的原文，不得写模型概括、字段名、文件名或常识。
+- 缺少内容时如实返回失败状态，不得输出“未知”“未发现”“暂无”等占位摘要。
+
+栏目边界：
+
+1. contract_number / 合同编号
+- 只提取当前合同自身明确标注的合同号或协议号，逐字保留字母、数字、连接符和前导零。
+- 项目编号、订单号、原合同编号、税号、账号和 PDF 文件名都不能替代合同编号。
+
+2. contract_title / 合同标题
+- 只使用首页、标题页或正文中明确呈现的正式标题，不根据内容概括标题，不使用文件名。
+
+3. parties / 相关方
+- summary_items 每个元素严格使用 `{role, name}`：role 只写明确业务角色或原文称谓，name 只写一个主体完整名称，均不写冒号等展示符号；保持原文顺序。
+- 最终的“角色：名称”由程序渲染，不得在 role 或 name 中合并多个主体。
+- 只包含合同权利义务主体；不得输出联系人、法定代表人、委托代理人、开户行、银行账号、税号或统一社会信用代码。
+- 不能仅按甲乙方顺序推断采购方、供应方等业务角色；角色不明确时使用原文称谓。
+
+4. time / 时间
+- summary_items 每个元素严格使用 `{type, text}`，type 只能是 signing_date、effective_date、effective_info、validity_period。
+- text 只写时间事实正文，不写“签订日期：”等中文标签；程序将根据 type 生成固定展示标签。
+- signing_date 只表示签订日期；不得在 reason 或 text 中把签订日期解释为合同生效依据。
+- 只表达签订日期、明确生效日期或生效文字、合同整体有效期；每个元素只表达一项。
+- 付款期、交付期、验收期、质保期、售后期、发票日期和打印日期不属于本栏目。
+- 不得根据签名、盖章版面或签署页的存在推断“签字盖章后生效”。
+- 不得输出主体、法定代表人、银行、账号、税号等签署页信息。没有可靠合同级时间事实时返回 not_found。
+
+5. main_content / 主要内容
+- 用一到两句自然中文表达谁与谁进行什么交易、主要标的、合同金额和必要的产品或服务说明。
+- 合同总金额必须与阶段款、单价、保证金、违约金和税额区分；没有明确总金额时不得计算。
+- 不输出内部枚举代码、字段路径、银行税务资料或详细履约条款。
+
+6. key_performance_terms / 关键履约约定
+- 按固定语义顺序提取有明确原文支持的关键约定：付款、交付/服务、验收、质量/质保、违约/解除、争议解决。
+- summary_items 每个元素严格使用 `{type, text}`；type 只能是 payment、delivery_service、acceptance、quality_warranty、breach_termination、dispute_resolution，并按该顺序输出，每种类型最多一项。
+- text 只写对应类型的履约事实，不写“付款：”“交付/服务：”等展示标签或冒号；中文标签由程序渲染，没有可靠内容的类型直接省略。
+- 优先保留明确触发条件、期限、比例、地点、起算点和重大后果；普通套话、签署效力、银行税务资料不得进入。
+- 合并同一事实，避免重复表达“款到发货”和“款到后若干日发货”。
+
+最终摘要正文由程序固定渲染；你只输出符合 Schema 的六个栏目对象，不输出 Markdown 或完整摘要文本。

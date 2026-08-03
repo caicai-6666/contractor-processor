@@ -18,8 +18,8 @@ class InspectFieldCatalog:
     def __init__(self, catalog: FieldCatalog) -> None:
         self._catalog = catalog
 
-    def execute(self) -> FieldCatalogSummary:
+    async def execute(self) -> FieldCatalogSummary:
         return FieldCatalogSummary(
-            core_count=len(self._catalog.load(FieldKind.CORE)),
-            attribute_count=len(self._catalog.load(FieldKind.ATTRIBUTE)),
+            core_count=len(await self._catalog.load(FieldKind.CORE)),
+            attribute_count=len(await self._catalog.load(FieldKind.ATTRIBUTE)),
         )

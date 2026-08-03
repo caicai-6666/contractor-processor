@@ -9,10 +9,10 @@ from contract_processor.domain.policies import record_attribute_occurrence
 class AttributeStatisticsTests(unittest.TestCase):
     def test_contract_count_deduplicates_same_contract(self) -> None:
         statistics = record_attribute_occurrence(
-            AttributeStatistics(), contract_id="contract-a", round_id="round-1"
+            AttributeStatistics(), document_id="a" * 64, round_id="round-1"
         )
         statistics = record_attribute_occurrence(
-            statistics, contract_id="contract-a", round_id="round-1"
+            statistics, document_id="a" * 64, round_id="round-1"
         )
 
         self.assertEqual(statistics.occurrence_count, 2)

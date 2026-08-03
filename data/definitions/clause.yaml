@@ -1,0 +1,106 @@
+schema_version: "0.5"
+field_set: clause
+status: designed
+description: >
+  按合同原始顺序完整保存条款内容，作为 Core 之外可供后续模型直接阅读和检索的合同文本代理层。
+
+output:
+  type: array
+  ordered: true
+  items:
+    type: object
+    required:
+      - clause_number
+      - heading
+      - category
+      - source_text
+      - page_refs
+    additional_properties: false
+    properties:
+      clause_number:
+        type: string
+        nullable: true
+        meaning: 合同原文中的条款编号或层级编号
+        extraction_rule: >
+          按原文保留“第三条”“4.2”“（三）”“附件一”等编号。独立提取无自有标题的子项时，
+          程序可以将原文父编号与原文子项标记确定性组合为“四（1）”等层级引用；
+          开头标记与父编号表示同一个顶层编号时不得重复拼接。原文没有任何编号时输出 null，
+          不得根据数组位置补造编号。
+        example: "第三条"
+
+      heading:
+        type: string
+        nullable: false
+        meaning: 条款原文标题，不包含已经单独提取的条款编号
+        extraction_rule: >
+          优先使用子项逐字可见的自有标题；子项没有自有标题时，可以继承最近的原文明示父标题。
+          自有标题和可继承父标题均不存在、无法辨认或只能根据正文概括时，整个条目不得提取。
+        example: "付款方式"
+
+      category:
+        type: string
+        nullable: false
+        meaning: 便于检索和路由的条款主类别
+        extraction_rule: >
+          使用简短、稳定的 lower_snake_case 语义标签；优先复用文档建议类别。
+          一个条款同时涉及多个主题时选择最主要的类别，无法可靠分类时使用 other，
+          但不得因此遗漏条款。
+        recommended_values:
+          - definition
+          - subject
+          - payment
+          - delivery_or_service
+          - acceptance
+          - quality
+          - warranty
+          - after_sales_service
+          - rights_and_obligations
+          - breach_or_termination
+          - confidentiality
+          - intellectual_property
+          - force_majeure
+          - dispute_resolution
+          - general
+          - attachment
+          - other
+        example: "payment"
+
+      source_text:
+        type: string
+        nullable: false
+        min_length: 1
+        meaning: 条款的完整原文文本
+        extraction_rule: >
+          自有标题的条款从原文标题开始保存，并包含对应的标题文字；PDF 中仅用于视觉排版的
+          字间空格、换行或制表符在 source_text 中原样保留。程序只清除 heading 比较形式中的
+          空白，并使用允许标题字符之间出现空白的正则匹配未经修改的 source_text；
+          继承父标题的子项从自身编号或项目标记开始保存，不得把父标题伪造进子项原文。
+          保留条件、例外、期限、金额、比例和交叉引用，不得以摘要或改写替代。
+          表格应转换为保持行列关系的 Markdown；同一条款跨页时合并为一个条款项。
+        example: "付款方式：合同签订后，甲方应在收到发票之日起十个工作日内支付全部价款。"
+
+      page_refs:
+        type: array
+        nullable: false
+        min_items: 1
+        unique_items: true
+        items:
+          type: integer
+          minimum: 1
+        meaning: 该条款在本次提供给模型的 PDF 页面序号
+        extraction_rule: >
+          按内容实际出现页面升序列出；跨页条款保留全部页面。
+          不得根据合同声称的总页数或不可见页面推断页码。
+        example: [2, 3]
+
+extraction_rules:
+  - 按合同原始顺序输出条款数组，数组位置即条款的排列顺序，不额外生成 clause_id 或 sequence。
+  - 每个条目必须具有自有原文明示标题，或具有可继承的最近父标题，并包含实质正文；不得根据正文拟造标题。
+  - “（n）标签：正文”中的标签属于子项自有标题；子项自有标题优先于父标题。
+  - 只有编号或项目符号但没有自有标题的子项，可以继承最近父标题并独立提取；没有父标题时不得提取。
+  - 编号可以为空；无编号但具有原文明示标题和实质正文的条款仍应保留。
+  - 提取所有实质性条款，不得只提取预定义类别；无法分类的内容使用 other。
+  - 质量、质保、保修范围与除外责任、售后服务、维修更换、维护、技术支持、培训和响应时限属于重点提取内容。
+  - 同一条款跨页延续时必须合并，不能因分页拆成多个不完整条款。
+  - 普通产品清单、价格表、主体签署和银行税务资料不属于 Clause；表格只有在具备原文明示标题且自身表达规范性约定时才可提取。
+  - 不输出摘要、reason、status、confidence 或模型自行补充的法律解释。

@@ -7,12 +7,17 @@ import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 STAGE_1_PROMPT = (
-    PROJECT_ROOT / "experiments/core_field_extraction/prompts/01_understand_contract.txt"
+    PROJECT_ROOT
+    / "src/contract_processor/infrastructure/extraction/core/prompts/01_understand_contract.txt"
 )
-STAGE_2_PROMPT = PROJECT_ROOT / "experiments/core_field_extraction/prompts/02_extract_core.txt"
-RUNNER = PROJECT_ROOT / "experiments/core_field_extraction/run.py"
+STAGE_2_PROMPT = (
+    PROJECT_ROOT
+    / "src/contract_processor/infrastructure/extraction/core/prompts/02_extract_core.txt"
+)
+RUNNER = PROJECT_ROOT / "src/contract_processor/infrastructure/extraction/core/pipeline.py"
 STAGE_3_PROMPT = (
-    PROJECT_ROOT / "experiments/core_field_extraction/prompts/03_review_missing_fields.txt"
+    PROJECT_ROOT
+    / "src/contract_processor/infrastructure/extraction/core/prompts/03_review_missing_fields.txt"
 )
 SETTINGS_PATHS = (
     PROJECT_ROOT / "configs/settings.yaml",
@@ -51,15 +56,27 @@ def test_stage_2_prompt_limits_output_to_current_single_field() -> None:
     assert prompt.index("{{CORE_FIELDS_YAML}}") < prompt.index("字段定义位于合同页面图像之后")
 
 
-def test_experiment_runner_contains_only_step_1_and_step_2() -> None:
+def test_stage_2_common_prompt_contains_no_other_core_field_ids() -> None:
+    """每次只注入当前字段 YAML，公共模板不得提前约束任何具体 Core。"""
+
+    prompt = STAGE_2_PROMPT.read_text(encoding="utf-8")
+    catalog = yaml.safe_load(
+        (PROJECT_ROOT / "data/definitions/core.yaml").read_text(encoding="utf-8")
+    )
+
+    assert all(field["field_id"] not in prompt for field in catalog["fields"])
+
+
+def test_production_core_pipeline_contains_only_step_1_and_step_2() -> None:
     runner = RUNNER.read_text(encoding="utf-8")
 
     assert not STAGE_3_PROMPT.exists()
     assert "Step 3" not in runner
     assert "step_3" not in runner
-    # 只检查阶段产物写入，避免默认 PDF 文件名中的日期片段造成误报。
     assert 'run_dir / "03_' not in runner
-    assert "final_core_extraction.json" in runner
+    assert "final_core_extraction.json" not in runner
+    assert "write_text(" not in runner
+    assert "print(" not in runner
 
 
 def test_qwen3_vl_instruct_sampling_defaults_are_synchronized() -> None:

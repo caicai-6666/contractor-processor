@@ -12,6 +12,7 @@ from contract_processor.domain.enums import (
     MergeAction,
     ReviewStatus,
 )
+from contract_processor.domain.identifiers import validate_document_id
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,11 +27,15 @@ class Evidence:
 
 @dataclass(frozen=True, slots=True)
 class Contract:
-    """以内容哈希标识的合同，不将本地文件路径带入领域模型。"""
+    """以原始 PDF 文件 SHA-256 作为稳定文档标识。"""
 
-    contract_id: str
+    document_id: str
     source_name: str
-    content_hash: str
+
+    def __post_init__(self) -> None:
+        """在领域边界拒绝非 SHA-256 文档标识。"""
+
+        validate_document_id(self.document_id)
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,7 +43,7 @@ class BatchRun:
     """一次固定合同批次处理的可追溯上下文。"""
 
     batch_id: str
-    contract_ids: tuple[str, ...]
+    document_ids: tuple[str, ...]
     field_catalog_version: str
     model_version: str
 
@@ -127,6 +132,26 @@ class FieldDefinition:
 
 
 @dataclass(frozen=True, slots=True)
+class FieldCatalogSnapshot:
+    """一次运行固定读取的字段目录快照。"""
+
+    kind: FieldKind
+    schema_version: str
+    status: str
+    definitions: tuple[FieldDefinition, ...]
+
+    @property
+    def is_empty(self) -> bool:
+        """空目录必须由显式状态和零字段共同表达。"""
+
+        return self.status == "empty" and not self.definitions
+
+    @property
+    def field_count(self) -> int:
+        return len(self.definitions)
+
+
+@dataclass(frozen=True, slots=True)
 class FieldObservation:
     """模型在单份合同中观察到的精简字段包络。"""
 
@@ -136,11 +161,12 @@ class FieldObservation:
     raw_value: str | None
     status: ExtractionStatus
     value: Any
-    contract_id: str
+    document_id: str
 
     def __post_init__(self) -> None:
         """在领域边界阻止状态、规范值和原始值相互矛盾的结果进入工作流。"""
 
+        validate_document_id(self.document_id)
         empty_statuses = {
             ExtractionStatus.NOT_FOUND,
             ExtractionStatus.AMBIGUOUS,
@@ -153,8 +179,7 @@ class FieldObservation:
         else:
             if self.value is not None:
                 raise ValueError(f"{self.status.value} 状态的 value 必须为空")
-        if self.status in empty_statuses and self.raw_value is not None:
-            raise ValueError(f"{self.status.value} 状态的 raw_value 必须为空")
+        # raw_value 承担审计职责；即使没有可采用 value，仍可保留最小相关原文。
 
 
 @dataclass(frozen=True, slots=True)
@@ -162,13 +187,13 @@ class AttributeStatistics:
     """Attribute 的发现频次；合同数是专家审核的主排序指标。"""
 
     occurrence_count: int = 0
-    contract_ids: frozenset[str] = frozenset()
+    document_ids: frozenset[str] = frozenset()
     first_seen_round: str | None = None
     last_seen_round: str | None = None
 
     @property
     def contract_count(self) -> int:
-        return len(self.contract_ids)
+        return len(self.document_ids)
 
 
 @dataclass(frozen=True, slots=True)

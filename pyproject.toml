@@ -9,9 +9,16 @@ description = "面向 PDF 合同的元数据发现工作流"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
+  "elasticsearch>=9.4,<10.0",
+  "fastapi>=0.116,<1.0",
+  "httpx>=0.27,<1.0",
+  "jsonschema>=4.23,<5.0",
   "langgraph>=1.2,<2.0",
   "llama-index-core>=0.14,<0.15",
   "openai>=2.0,<3.0",
+  "pydantic>=2.8,<3.0",
+  "PyMuPDF>=1.24,<2.0",
+  "python-dotenv>=1.0,<2.0",
   "PyYAML>=6.0,<7.0",
 ]
 
@@ -21,14 +28,17 @@ dev = [
   "pytest>=8.0,<9.0",
 ]
 experiments = [
-  "jsonschema>=4.23,<5.0",
-  "pydantic>=2.8,<3.0",
-  "PyMuPDF>=1.24,<2.0",
-  "python-dotenv>=1.0,<2.0",
+  # 保留兼容安装组；实验脚本与正式工作流现在使用同一套运行依赖。
 ]
 
 [project.scripts]
-contract-processor = "contract_processor.interfaces.cli.app:main"
+contract-run-single = "contract_processor.interfaces.cli.run_single_file:main"
+contract-run-batch = "contract_processor.interfaces.cli.run_batch:main"
+contract-inspect-fields = "contract_processor.interfaces.cli.inspect_fields:main"
+
+[tool.hatch.build.targets.wheel]
+# 正式 Prompt 位于包目录内，随 wheel 一并分发，运行时不依赖 experiments/。
+packages = ["src/contract_processor"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

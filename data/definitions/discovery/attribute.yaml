@@ -1,0 +1,175 @@
+schema_version: "0.3"
+field_set: attribute
+status: draft
+extraction:
+  # 初次失败后只允许局部重试一次，避免字段级质量控制变为无界模型调用。
+  max_retries_per_field: 1
+value_envelope:
+  non_object: "{raw_value: string|null, reason: string, status: found|not_found|ambiguous|conflicting|not_applicable, value: typed|null}"
+  object: "{status: application-derived, properties: {child: {raw_value: string|null, reason: string, status: found|not_found|ambiguous|conflicting|not_applicable|out_of_scope, value: typed|null}}}"
+# 受控重发现实验：保留以下五个已知字段作为固定覆盖约束，其余生产字段不在本快照中。
+fields:
+  - field_id: order_numbers
+    name: 订单编号
+    meaning: 当前合同自身或正文明确引用的采购订单、销售订单及其他执行订单编号。
+    aliases: [订单号, 采购订单号, 销售订单号, PO号, Purchase Order No.]
+    not_meaning: [当前合同编号, 关联合同编号, 项目编号, 报价单编号, 发票编号]
+    output:
+      type: array
+      format: "[string]，按首次出现顺序去重并保留原始格式"
+      nullable: true
+      min_items: 1
+      items:
+        name: 单个订单编号
+        meaning: 合同明确标注的一个采购订单、销售订单或执行订单编号
+        type: string
+        nullable: false
+        not_meaning: [合同编号, 项目编号, 报价单编号, 发票编号]
+        extraction_rule: 保留原始字母、数字、连接符和前导零，不补齐或改写编号。
+      example: ["PO-2025-001"]
+    extraction_rule: 仅提取由订单号、采购订单号、销售订单号或 PO 等明确标签标识，或当前文书明确作为订单且能够可靠识别的编号；不得从文件名推断，不得把 contract_number 或 related_contract_numbers 无条件复制到本字段。
+    examples:
+      - source_text: "采购订单号：PO-2025-001"
+        output: ["PO-2025-001"]
+
+  - field_id: project_numbers
+    name: 项目编号
+    meaning: 当前合同明确归属的采购、招标、研发、建设或其他业务项目编号。
+    aliases: [项目编号, 项目号, 招标编号, 采购项目编号, 工程编号]
+    not_meaning: [合同编号, 订单编号, 标的型号, 发票编号, 主体信用代码, 项目名称, 项目名称中的产品或方案代号]
+    output:
+      type: array
+      format: "[string]，按首次出现顺序去重并保留原始格式"
+      nullable: true
+      min_items: 1
+      items:
+        name: 单个项目编号
+        meaning: 合同明确标注的一个业务项目、采购项目、招标项目或工程编号
+        type: string
+        nullable: false
+        not_meaning: [合同编号, 订单编号, 产品型号, 发票编号]
+        extraction_rule: 原文必须同时保留明确编号标签及编号值；不得只摘录项目名称中的编码式片段。
+      example: ["XM-2025-018"]
+    extraction_rule: 只有“项目编号、项目号、项目编码、项目代码、招标编号、采购项目编号、工程编号、立项编号、任务编号”等明确编号语义与编号值直接对应时才提取；“项目名称”即使含有编码式片段也不构成项目编号。原文必须保留标签与编号值；同一编号重复出现时按首次出现顺序去重，归属不明时输出 ambiguous。
+    examples:
+      - source_text: "项目编号：XM-2025-018"
+        output: ["XM-2025-018"]
+
+  - field_id: delivery_locations
+    name: 交付地点
+    meaning: 合同明确约定的收货、安装、施工、成果提交或主要服务履行地点。
+    aliases: [交货地点, 交付地点, 收货地址, 安装地点, 项目地点, 履约地点]
+    not_meaning: [合同主体注册地址, 通讯地址, 开票地址, 仲裁地点, 管辖法院所在地]
+    output:
+      type: array
+      format: "[string]，按首次出现顺序去重，保留合同中的地点表达"
+      nullable: true
+      min_items: 1
+      items:
+        name: 单个交付地点
+        meaning: 与货物、成果或主要服务交付义务直接对应的一个地点
+        type: string
+        nullable: false
+        not_meaning: [主体注册地址, 开票地址, 争议解决地点]
+        extraction_rule: 保留合同可核对的完整地点表达，不借助地图或外部知识补全行政区划。
+      example: ["甲方指定的深圳市南山区项目现场"]
+    extraction_rule: 地点必须与交付、收货、安装、施工或主要服务履行义务明确绑定；“甲方指定地点”等未给出具体地址的约定仍应忠实保留，不得用合同主体地址替代。
+    examples:
+      - source_text: "交货地点：甲方指定的深圳市南山区项目现场"
+        output: ["甲方指定的深圳市南山区项目现场"]
+
+  - field_id: acceptance_mechanism
+    name: 验收机制
+    meaning: 合同对货物、成果或服务验收所约定的标准、期限及逾期未反馈是否视为验收通过。
+    aliases: [验收标准, 验收方式, 验收期限, 验收条件, 视为验收]
+    not_meaning: [质量保证期, 交付期限, 一般质量承诺, 付款条件, 验收款支付期限, 尾款支付期限, 试用期]
+    output:
+      type: object
+      format: "{standard_text: string|null, deadline_text: string|null, deemed_accepted: boolean|null}"
+      nullable: true
+      required: [standard_text, deadline_text, deemed_accepted]
+      additional_properties: false
+      properties:
+        standard_text:
+          name: 验收标准
+          meaning: 用于判断货物、成果或服务是否通过验收的合同标准
+          type: string
+          nullable: true
+          extraction_rule: 保留标准名称、附件引用或最小必要标准原文，不概括完整验收条款。
+        deadline_text:
+          name: 验收期限
+          meaning: 收货、安装、提交成果或提出异议后的验收时限
+          type: string
+          nullable: true
+          extraction_rule: 保留验收行为、验收标准、收货/安装/成果提交后的验收或提出异议期限及其起算条件。仅约定“支付验收款”“尾款支付”或其他付款期限时为 null，不得作为验收期限。
+        deemed_accepted:
+          name: 是否约定视为验收通过
+          meaning: 合同是否明确规定逾期未验收或未提出异议即视为验收合格
+          type: boolean
+          nullable: true
+          extraction_rule: 明示视为验收通过时填 true，明示不得视为通过时填 false，未提及则为 null。
+      example: {standard_text: 按合同附件技术规格验收, deadline_text: 到货后5个工作日内, deemed_accepted: true}
+    extraction_rule: 只提取针对主要标的的验收安排，不把一般质量保证、付款前置条件、验收款付款期限或尾款付款期限单独当作验收机制；允许部分子字段为空，完整条款仍由 Clause 保存。
+    examples:
+      - source_text: "甲方应在到货后5个工作日内按附件技术规格验收，逾期未提出书面异议视为验收合格。"
+        output: {standard_text: 按合同附件技术规格验收, deadline_text: 到货后5个工作日内, deemed_accepted: true}
+
+  - field_id: performance_security
+    name: 履约保障
+    meaning: 合同明确约定的履约保证金、质量保证金、保函或其他履约担保安排。
+    aliases: [履约保证金, 质保金, 质量保证金, 履约保函, 银行保函]
+    not_meaning: [预付款, 一般付款阶段, 违约金, 定金, 未与履约保障绑定的尾款]
+    output:
+      type: object
+      format: "{security_type: performance_deposit|quality_retention|bank_guarantee|other|null, amount: number|null, ratio: number|null, currency: string|null, release_trigger_text: string|null}"
+      nullable: true
+      required: [security_type, amount, ratio, currency, release_trigger_text]
+      additional_properties: false
+      properties:
+        security_type:
+          name: 履约保障类型
+          meaning: 合同明确采用的履约保障形式
+          type: enum
+          nullable: true
+          values:
+            performance_deposit: 履约保证金
+            quality_retention: 从合同价款中保留的质保金或质量保证金
+            bank_guarantee: 银行或金融机构出具的履约保函
+            other: 明确存在但不属于以上类别的履约保障
+          extraction_rule: 按合同明确名称和用途分类；普通尾款只有明确承担质保金作用时才归为 quality_retention。
+        amount:
+          name: 履约保障金额
+          meaning: 合同明确写明的履约保障金额
+          type: number
+          nullable: true
+          minimum: 0
+          not_meaning: [合同总额, 预付款, 违约金]
+          extraction_rule: 只提取明示金额，不根据比例与合同总额计算。
+        ratio:
+          name: 履约保障比例
+          meaning: 履约保障占合同约定计价基数的百分比
+          type: number
+          unit: percent
+          nullable: true
+          minimum: 0
+          maximum: 100
+          extraction_rule: 输出5表示5%而不是0.05；未明确比例时不得反推。
+        currency:
+          name: 履约保障币种
+          meaning: 履约保障金额使用的币种
+          type: string
+          format: ISO-4217 三字母大写代码
+          nullable: true
+          pattern: "^[A-Z]{3}$"
+          extraction_rule: 只有金额存在且币种有合同依据时填写；人民币规范化为 CNY。
+        release_trigger_text:
+          name: 返还或解除条件
+          meaning: 保证金返还、质保金支付或保函解除所依赖的事件和期限
+          type: string
+          nullable: true
+          extraction_rule: 保留与当前履约保障直接绑定的最小必要条件原文。
+      example: {security_type: quality_retention, amount: null, ratio: 5, currency: null, release_trigger_text: 质保期满且无质量问题后支付}
+    extraction_rule: 只有合同明确设置履约保证金、质保金、保函或同等保障时才提取；普通分期付款、违约责任或没有保障用途的尾款不属于本字段。若同一合同存在多种独立保障且无法由单一对象忠实表达，输出 ambiguous 并在 reason 中列明候选，不擅自合并金额和条件。
+    examples:
+      - source_text: "合同总价的5%作为质保金，质保期满且无质量问题后支付。"
+        output: {security_type: quality_retention, amount: null, ratio: 5, currency: null, release_trigger_text: 质保期满且无质量问题后支付}

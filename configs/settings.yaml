@@ -1,0 +1,85 @@
+# 本地实际运行配置。请在首次运行前填写 embedding 与 reranker 的模型名称。
+# 密钥由 .env 提供，不得直接写入本文件。
+
+models:
+  mllm:
+    provider: vllm
+    base_url: http://127.0.0.1:8000/v1
+    api_key_env: VLLM_MLLM_API_KEY
+    model: qwen3-vl-32b-instruct-fp8
+    endpoint: chat_completions
+    timeout_seconds: 300
+    # 单合同的 Core→Attribute、Clause、Abstract 三条业务线路共享该并发配额。
+    max_concurrent_requests: 3
+    # 必须与 vLLM 的 --max-model-len 保持一致；当前 Instruct 服务使用 65536。
+    context_window_tokens: 65536
+    generation:
+      temperature: 0.7
+      top_p: 0.8
+      top_k: 20
+      presence_penalty: 1.5
+      repetition_penalty: 1.0
+      seed: 3407
+      max_completion_tokens: 8192
+    vision:
+      max_pages_per_request: 5
+
+  embedding:
+    provider: vllm
+    base_url: http://127.0.0.1:8001/v1
+    api_key_env: VLLM_EMBEDDING_API_KEY
+    model: qwen3-vl-embedding-2b
+    endpoint: embeddings
+    timeout_seconds: 60
+    batch_size: 32
+    max_concurrent_requests: 3
+    dimensions: 2048
+    normalize: true
+
+  reranker:
+    provider: vllm
+    base_url: http://127.0.0.1:8002/v1
+    api_key_env: VLLM_RERANKER_API_KEY
+    model: qwen3-vl-reranker-2b
+    endpoint: rerank
+    timeout_seconds: 60
+    candidate_limit: 20
+    top_n: 5
+
+paths:
+  input_contracts: data/input
+  core_fields: data/definitions/core.yaml
+  attribute_fields: data/definitions/attribute.yaml
+  discovery_core_fields: data/definitions/discovery/core.yaml
+  discovery_attribute_fields: data/definitions/discovery/attribute.yaml
+  clause_fields: data/definitions/clause.yaml
+  contract_summary_policy: data/definitions/contract_summary.yaml
+  contract_embedding_policy: data/definitions/contract_embedding.yaml
+  source_documents: data/contracts
+  runtime_data: data
+
+processing:
+  persist_page_artifacts: false
+
+runtime:
+  # production 要求 Core 非空；discovery 同时支持空 Core 与非空 Core。
+  mode: production
+
+ingestion:
+  own_company_names_env: CONTRACT_PROCESSOR_OWN_COMPANY_NAMES
+
+elasticsearch:
+  # HTTPS 与 CA 校验由本机 Elasticsearch 9.4.4 部署提供。
+  hosts: [https://localhost:9200]
+  username_env: ELASTICSEARCH_USERNAME
+  password_env: ELASTICSEARCH_PASSWORD
+  # 系统 CA 目录对运行用户不可读；部署时复制到本地运行时目录，不提交 Git。
+  ca_certs: data/certs/http_ca.crt
+  verify_certs: true
+  index_name: contracts-v1
+  # 入库验收使用独立索引；验收运行会先删除并按正式 mapping 重建，绝不触碰 index_name。
+  ingestion_experiment_index_name: contracts-ingestion-experiment-v1
+  # Qwen3-VL-Embedding-2B 的完整输出维度。
+  vector_dimensions: 2048
+  number_of_shards: 1
+  number_of_replicas: 0

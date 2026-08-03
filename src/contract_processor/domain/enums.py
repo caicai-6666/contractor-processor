@@ -3,6 +3,13 @@
 from enum import Enum
 
 
+class RuntimeMode(str, Enum):
+    """项目允许构建的两种互斥运行模式。"""
+
+    DISCOVERY = "discovery"
+    PRODUCTION = "production"
+
+
 class FieldKind(str, Enum):
     """字段所属的字段库。"""
 

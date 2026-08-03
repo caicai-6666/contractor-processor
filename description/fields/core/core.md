@@ -1,12 +1,29 @@
 # Core 字段目录
 
-> 状态：`0.9` 初稿，待领域专家基于代表性合同集审核。  
+> 状态：`1.1` 初稿已接入正式异步抽取服务，仍待领域专家基于代表性合同集审核。
 > 适用范围：合同级元数据抽取、RAG 前置过滤和 Attribute 发现边界。  
-> 规范地位：[`core.yaml`](core.yaml) 是程序读取与提示词注入的唯一规范源。
+> 规范地位：[`data/definitions/core.yaml`](../../../data/definitions/core.yaml) 是程序读取与提示词注入的唯一机器规范源。
+
+---
+
+## 快速导航
+
+- [内部提取管线](#11-core-内部提取管线)：单字段抽取、校验与覆盖门禁。
+- [字段总览](#3-字段总览)：合同级 Core 字段的业务范围。
+- [递归输出定义](#4-递归输出定义)：机器定义与值包络的关系。
+- [历史版本迁移](#6-历史版本迁移)：结构演进与重新提取要求。
+
+---
 
 ## 1. 设计目标
 
 Core 只保存跨合同稳定、业务重要、适合检索过滤且能够追溯到合同证据的信息。付款、交付、服务、验收、质保、违约和争议解决等上下文敏感条款仍由 Clause 层完整保留。
+
+字段定义的必填键、8 种基础类型、递归 object/array 规则和可用约束以
+[字段定义契约](../../reference/field-definition-contract.md) 为准；本文件只补充 Core 的业务
+语义、值包络和字段级提取规则。
+
+> **机器规范优先：** [`data/definitions/core.yaml`](../../../data/definitions/core.yaml) 是唯一机器规范源；本文只解释业务边界、值包络与审核重点。
 
 `0.2` 解决了字段语义边界；`0.3` 进一步解决复杂值只有格式字符串、子字段不能被 JSON Schema 强制约束的问题：
 
@@ -35,6 +52,44 @@ object 字段由每个直属子字段携带 `reason`，并统一采用
 `0.9` 删除 `contract_amount.tax_exclusive_amount`。合同中的未税价格或未税总额仍由
 Step 1 穷举，并保留在 `source_amount_text` 中，但不再形成独立 Core 子字段。
 
+`1.0` 将 `contract_number` 确定为合同必填且唯一的业务标识。
+字段定义改为 `nullable: false`；提取层仍允许如实报告缺失、歧义或冲突，
+但任一非 `found` 结果都是合同级校验失败，不得生成最终 Core 产物、摘要或索引记录。
+
+`1.1` 修正上述身份假设：实际合同可能没有合同编号，编号也不能可靠承担文件唯一性。
+`contract_number` 恢复为可空业务字段；所有合同级产物改用原始 PDF 文件字节的 SHA-256
+作为 `document_id`。编号缺失、冲突或重复不再阻断最终产物。
+
+---
+
+## 1.1 Core 内部提取管线
+
+```text
+共享 PDF 页面 + Core 字段目录
+  → Step 1：合同整体理解
+  → 合同理解 JSON Schema / 结构校验
+  → 精简 bullet 上下文
+  → Step 2：逐字段受约束提取（串行）
+      ├─ 字段 JSON Schema 校验
+      ├─ 业务包络校验与确定性规范化
+      ├─ 成功字段 → 合并 Core fields
+      └─ 单字段结构化失败 → 隔离记录并继续下一字段
+  → 字段覆盖、必填字段与最终业务校验
+  → Core StageResult
+```
+
+Step 1 只建立文书概览、页面主题、主体线索、信息位置以及金额/费用原文等共享理解，不能直接
+生成最终 Core 值。Step 2 始终以原始 PDF 为事实来源，并把经过校验的 Step 1 bullet 上下文
+作为定位辅助；每次调用只允许返回一个字段，避免多个字段之间互相干扰。
+
+字段级结构化失败不会覆盖已经成功的字段，但会进入该字段的诊断指标。阶段末端会检查目录
+覆盖、值包络和所有非空字段要求；任一校验未通过时，正式适配器拒绝将 Core 结果交给后续
+工作流。模型响应、提示词和诊断只在内存中传递，实验入口如需落盘应在 `experiments/` 内完成。
+
+> **事实来源：** Step 1 的理解地图只用于定位；Step 2 的每个最终字段都必须直接依据原始 PDF，不得由上下文补写或否定事实。
+
+---
+
 ## 2. 标量与对象值包络
 
 最终结果的 `fields` 是以 `field_id` 为键的对象。非 object 字段使用
@@ -44,7 +99,7 @@ Step 1 穷举，并保留在 `source_amount_text` 中，但不再形成独立 Co
 
 ```json
 {
-  "document_id": "设备采购合同",
+  "document_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   "fields": {
     "effective_mechanism": {
       "status": "found",
@@ -83,9 +138,12 @@ Step 1 穷举，并保留在 `source_amount_text` 中，但不再形成独立 Co
 | `conflicting` | 存在互不相容的候选值 | 必须为 `null` |
 | `not_applicable` | 字段对该合同类型明确不适用 | 必须为 `null` |
 
-非 object 字段的 `not_found/not_applicable/ambiguous/conflicting` 仍要求
-`raw_value/value` 同时为 JSON `null`。字段属性顺序固定为
+非 object 字段的 `not_found/not_applicable/ambiguous/conflicting` 要求
+`value` 为 JSON `null`。`raw_value` 可为 null；存在相关但不足以形成可采用值的原文时，
+可保留最小相关原文以支持审计。字段属性顺序固定为
 `raw_value → reason → status → value`。
+
+> **包络顺序：** `reason` 是绑定到当前值的简短审计摘要，不是完整 CoT；它必须位于 `status` 与 `value` 之前，并以固定格式承诺后续决定。
 
 ### object 直属子字段状态
 
@@ -93,7 +151,7 @@ object 的每个直属子字段固定输出 `raw_value → reason → status →
 一个直属子字段处理，不递归包裹数组元素内部属性。
 
 - `found`：存在唯一可采用的子字段值，`value` 非 null。
-- `not_found/not_applicable`：`raw_value/value` 都为 null。
+- `not_found/not_applicable`：`value` 为 null；`raw_value` 可为 null，也可保留说明“有相关语境但无可采用值”的最小原文。
 - `ambiguous/conflicting`：`value` 为 null，`raw_value` 保留相关候选原文，
   `reason` 说明无法采用的原因。
 - `out_of_scope`：存在相关原文，但不属于该子字段允许采用的业务口径；
@@ -120,10 +178,18 @@ object 的每个直属子字段固定输出 `raw_value → reason → status →
 
 - 非 object 字段自身携带 `reason`；object 字段只由各直属子字段携带 `reason`。
 - `reason` 位于同一包络的 `status` 之前，依据已经生成的 `raw_value` 给出一至两句判断摘要。
+- `reason` 必须在结尾明确承诺后续输出决定：`found` 使用“所以接下来的
+  `status=found，value=非 null`”；空值状态使用“所以接下来的 `status=实际状态，value=null`”。
+  后续结构化 `status/value` 必须与该决定一致。
+- Prompt 要求整个 `reason`（含固定输出决定）不超过 300 个字符；动态 JSON Schema 和本地
+  Pydantic 使用 400 个字符的硬上限，保留 100 个字符的生成容错。复杂数组或对象不在
+  `reason` 中重复完整值。
 - 顶层不生成 `reason`，对象外层也不生成 `reason`，避免摘要与实际负责的判断脱节。
 - `reason` 是面向审计的简短结论摘要，不是完整 CoT，也不得展开逐步推理。
 - 字段包络不再携带独立 `evidence` 或 `conflicts`；原文追溯由 `raw_value` 承担。
 - Core 提取实验的 Step 2 固定为单字段调用；结果合并时保持各摘要在原字段或子字段内，不再串联为根级文本。
+
+---
 
 ## 3. 字段总览
 
@@ -142,7 +208,17 @@ object 的每个直属子字段固定输出 `raw_value → reason → status →
 | `contract_amount` | 合同金额 | 金额性质、币种和税务口径 |
 | `subject_matter` | 合同标的 | 标的概括、受控分类和主要项目 |
 
-完整定义、别名、反例、输出格式和提取规则见 [`core.yaml`](core.yaml)。
+完整定义、别名、反例、输出格式和提取规则见
+[`data/definitions/core.yaml`](../../../data/definitions/core.yaml)。
+
+`contract_number` 是可空业务字段，只用于展示、精确检索和关联分析，不承担唯一身份职责。
+缺失时如实返回 `not_found + null`；重复编号可以属于不同原始文件。合同级唯一性由程序对
+原始 PDF 文件字节计算的 SHA-256 `document_id` 保证，完整规则见
+[合同文档身份协议](../../architecture/document-identity.md)。
+
+> **身份边界：** `contract_number` 是可空业务字段；所有合同级产物的文件身份始终使用原始 PDF SHA-256 `document_id`。
+
+---
 
 ## 4. 递归输出定义
 
@@ -175,9 +251,16 @@ output:
 - 数值、字符串 → 最小值、最大值、长度和格式约束；
 - 每个字段 → 绑定自身 value Schema 的统一包络。
 
+模型单字段 Schema 只包含 `fields`，不包含 `document_id`。最终 Core 合并产物中的
+`document_id` 由程序计算后注入，模型无法使用合同编号、标题或文件名替代。
+
 生成后的完整 `fields` 对象要求 12 个 Core 键全部存在并禁止额外键；分批实验则为当前
 字段子集生成同样严格的 `fields` 约束。当前实验不包含模型复核步骤，Step 2 的合并
 结果直接接受相同 Schema 与业务包络校验。
+
+> **结构约束：** 模型只返回字段值包络；`document_id` 由程序注入，完整字段对象由动态 Schema 和本地业务校验共同约束。
+
+---
 
 ## 5. 关键边界
 
@@ -211,6 +294,10 @@ output:
 `effective_mechanism.trigger_type=on_signing_and_seal`；不得仅选择 `on_signing`
 或 `on_seal` 而丢失另一项必要条件。
 
+生效日期还受原文证据不变量约束。明确日期、签订之日和最后签署日可按字段规则归一化；
+签字并盖章、付款、审批或其他条件的完成日期必须直接出现在生效条款证据中，不能把合同
+签订日期当作这些条件实际完成的日期。
+
 ### 主体原文与规范化
 
 `source_name` 和 `source_designation` 忠实保留合同原文。`normalized_name`、`business_role` 和统一社会信用代码是并行的规范化信息，不能覆盖原文，也不能仅按甲乙方顺序推断。
@@ -231,78 +318,13 @@ output:
 
 `categories` 使用受控枚举承担稳定过滤；`summary` 和 `items.source_name` 承担可读性与原文追溯。`items.brand` 保存合同原文明示且能与当前项目可靠对应的品牌或厂牌；该键固定输出但允许为 `null`，不得依据型号、生产厂家、供应商名称或外部知识推断品牌。行业专有分类在积累足够 Attribute 统计后再由专家扩展，不允许模型即时创造枚举。
 
-## 6. 版本迁移
+---
 
-本版本是破坏性字段库升级，历史结果应显式迁移或重新提取：
+## 6. 历史版本迁移
 
-| 0.1 | 0.2 |
-| --- | --- |
-| `contract_type` | 拆为 `transaction_type`、`contract_form`，并新增 `document_role` |
-| `effective_date` | 替换为 `effective_mechanism` |
-| `contract_term` | 替换为 `contract_validity_period`；旧值若实际是货期或服务期，不得迁移，应进入 Clause |
-| `contract_parties[].name` | 改为 `source_name`，新增规范名称、业务角色和信用代码 |
-| `contract_amount` | 新增金额性质、税务口径与原文金额 |
-| `subject_matter` | 改为受控多分类和结构化项目 |
+历史结果的迁移记录、破坏性变更与重新提取要求已移至[Core 字段目录版本迁移记录](core-version-history.md)。当前字段契约无法由旧产物可靠还原时，必须重新读取原始 PDF 并重新提取；不得依据缺失字段、旧空值或历史摘要进行推断。
 
-禁止无证据地把旧 `sales` 映射为新 `goods`，或把旧 `contract_term.duration_text` 直接迁移为合同有效期。
-
-从 0.2 到 0.3：
-
-- 历史 `fields` 数组改为以 `field_id` 为键的对象。
-- 包络不再重复输出 `field_id`。
-- `raw_value` 统一为最小必要原文字符串或 `null`。
-- `evidence.aspect` 替换为机器可校验的 `evidence.value_path`。
-- object 的所有子键必须存在；旧结果缺少子键时不能直接视为合法 0.3 数据。
-
-从 0.3 到 0.4：
-
-- 删除 `contract_amount.value.tax_amount`。历史结果迁移时直接移除此键，不再抽取或计算税额；
-  `tax_rate` 仅保留合同明示值或满足同口径规则时的确定性结果。
-
-从 0.4 到 0.5：
-
-- 字段包络删除 `evidence` 和 `conflicts`，固定为
-  `status/value/raw_value/derivation/confidence`。
-- 顶层新增必填 `reason`，位于 `fields` 前，每批用一至两句说明判断依据。
-- 历史歧义或冲突候选不会自动迁移；如需保留，应另存为审计产物，不能塞回 0.5 字段包络。
-
-从 0.5 到 0.6：
-
-- 字段包络删除 `derivation` 和 `confidence`，固定为 `raw_value/status/value`；
-  生成顺序同样固定为先原文、后状态、再规范值。
-- `effective_mechanism.value` 删除 `date_source`，只保留 `date`、`trigger_type` 和
-  `trigger_text`。
-- 顶层删除 `overall_warnings`，跨字段标识不一致等运行信息只写入
-  `02_field_manifest.json`。
-- 旧结果迁移时直接删除上述键；不得把它们的历史值拼入 `raw_value` 或 `reason`。
-
-从 0.6 到 0.7：
-
-- 非 object 字段仍保留 `raw_value/status/value`。
-- object 字段由 `{raw_value,status,value:{...}}` 改为
-  `{status,properties:{子字段:{raw_value,status,value,reason}}}`。
-- object 外层 status 不再由模型生成；迁移旧结果不能可靠还原各子字段状态和 reason，
-  应重新提取，不得仅按旧对象中的 null 值猜测。
-- 新增子字段状态 `out_of_scope`，用于保留“存在相关原文但不属于可采用口径”的候选。
-- 顶层 `reason` 从 `fields` 之前移到之后；历史字符串可原样迁移，但不代表具有新的
-  子字段粒度。
-
-从 0.7 到 0.8：
-
-- 非 object 字段由 `{raw_value,status,value}` 改为
-  `{raw_value,reason,status,value}`。
-- object 直属子字段的键顺序由 `raw_value/status/value/reason` 改为
-  `raw_value/reason/status/value`；对象外层结构不变。
-- 删除根级 `reason`。旧根级摘要无法可靠拆分给具体字段，历史结果如需满足 0.8
-  审计粒度，应重新提取而不是机械分配。
-- 收紧 `contract_validity_period.start_date`：签订日期或生效日期本身不等于合同
-  整体有效期起点，只有合同明确将其定义为整体有效期或合作周期起点时才可采用。
-
-从 0.8 到 0.9：
-
-- 删除 `contract_amount.tax_exclusive_amount`，旧结果迁移时直接移除此子字段。
-- 未税价格、未税总额及不含税总价仍保留在 `source_amount_text`，并继续作为税率是否
-  允许计算的原文输入，但不再形成独立 Core 值。
+---
 
 ## 7. 专家审核重点
 

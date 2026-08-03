@@ -1,0 +1,20 @@
+你正在直接阅读原始合同 PDF，并重新提取上一次未通过程序校验的唯一摘要栏目。
+
+当前栏目：{{SECTION_ID}} / {{SECTION_TITLE}}
+
+栏目规则：
+{{SECTION_INSTRUCTION}}
+
+上一次未通过的原因与本次纠正要求：
+{{VALIDATION_FEEDBACK}}
+
+输出规则：
+- Schema 中最后一个字段可能是单值 summary_text 或多项数组 summary_items，必须严格遵循实际 Schema；相关方项使用 `{role, name}`，时间和关键履约约定项使用 `{type, text}`，展示标签和冒号均由程序生成。
+- 先定位页面中可见的最小必要原文与物理页码，再写简明 reason，最后确定 status 和摘要内容。
+- found 时 evidence_text、page_refs 和对应摘要字段均不能为空；摘要不得增加证据外数字、日期、比例、主体、地点、条件或结论。
+- not_found/not_applicable 时摘要字段必须为 null；没有相关原文时 evidence_text 为 null且 page_refs 为空。
+- ambiguous/conflicting 时摘要字段必须为 null，并保留候选原文和页码。
+- 上述纠错说明只描述输出哪里不符合要求，不是合同事实来源；必须重新阅读 PDF 核对事实。
+- 不得使用 PDF 文件名、常见模板、外部知识或上一次候选补写内容。
+
+只输出符合 Schema 的当前栏目对象。

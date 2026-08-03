@@ -9,6 +9,7 @@ venv/
 
 # Local configuration and runtime data
 .env
+data/certs/*
 data/input/*
 !data/input/.gitkeep
 data/runs/*
@@ -19,6 +20,8 @@ data/stores/*
 !data/stores/.gitkeep
 data/logs/*
 !data/logs/.gitkeep
+data/contracts/*
+!data/contracts/.gitkeep
 
 # Exploratory demo outputs
 experiments/outputs/*

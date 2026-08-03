@@ -1,0 +1,13 @@
+schema_version: "1.1"
+
+# 指令内容或视觉融合策略变更后必须同步提升版本；正式索引同时保存内容哈希。
+text_instructions:
+  contract_name_vector: Represent the contract title for semantic retrieval.
+  product_names_vector: Represent the contract product or service names for semantic retrieval.
+  abstract_vector: Represent the contract summary for semantic retrieval.
+
+visual_instruction: Represent this contract page for visual near-duplicate contract retrieval.
+visual_strategy: normalized_page_mean_v1
+render_scale: 2.0
+render_format: jpeg
+jpeg_quality: 90

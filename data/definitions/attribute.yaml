@@ -1,0 +1,403 @@
+schema_version: "0.3"
+field_set: attribute
+status: draft
+extraction:
+  # 初次失败后只允许局部重试一次，避免字段级质量控制变为无界模型调用。
+  max_retries_per_field: 1
+value_envelope:
+  non_object: "{raw_value: string|null, reason: string, status: found|not_found|ambiguous|conflicting|not_applicable, value: typed|null}"
+  object: "{status: application-derived, properties: {child: {raw_value: string|null, reason: string, status: found|not_found|ambiguous|conflicting|not_applicable|out_of_scope, value: typed|null}}}"
+fields:
+  - field_id: order_numbers
+    name: 订单编号
+    meaning: 当前合同自身或正文明确引用的采购订单、销售订单及其他执行订单编号。
+    aliases: [订单号, 采购订单号, 销售订单号, PO号, Purchase Order No.]
+    not_meaning: [当前合同编号, 关联合同编号, 项目编号, 报价单编号, 发票编号]
+    output:
+      type: array
+      format: "[string]，按首次出现顺序去重并保留原始格式"
+      nullable: true
+      min_items: 1
+      items:
+        name: 单个订单编号
+        meaning: 合同明确标注的一个采购订单、销售订单或执行订单编号
+        type: string
+        nullable: false
+        not_meaning: [合同编号, 项目编号, 报价单编号, 发票编号]
+        extraction_rule: 保留原始字母、数字、连接符和前导零，不补齐或改写编号。
+      example: ["PO-2025-001"]
+    extraction_rule: 仅提取由订单号、采购订单号、销售订单号或 PO 等明确标签标识，或当前文书明确作为订单且能够可靠识别的编号；不得从文件名推断，不得把 contract_number 或 related_contract_numbers 无条件复制到本字段。
+    examples:
+      - source_text: "采购订单号：PO-2025-001"
+        output: ["PO-2025-001"]
+
+  - field_id: project_numbers
+    name: 项目编号
+    meaning: 当前合同明确归属的采购、招标、研发、建设或其他业务项目编号。
+    aliases: [项目编号, 项目号, 招标编号, 采购项目编号, 工程编号]
+    not_meaning: [合同编号, 订单编号, 标的型号, 发票编号, 主体信用代码, 项目名称, 项目名称中的产品或方案代号]
+    output:
+      type: array
+      format: "[string]，按首次出现顺序去重并保留原始格式"
+      nullable: true
+      min_items: 1
+      items:
+        name: 单个项目编号
+        meaning: 合同明确标注的一个业务项目、采购项目、招标项目或工程编号
+        type: string
+        nullable: false
+        not_meaning: [合同编号, 订单编号, 产品型号, 发票编号]
+        extraction_rule: 原文必须同时保留明确编号标签及编号值；不得只摘录项目名称中的编码式片段。
+      example: ["XM-2025-018"]
+    extraction_rule: 只有“项目编号、项目号、项目编码、项目代码、招标编号、采购项目编号、工程编号、立项编号、任务编号”等明确编号语义与编号值直接对应时才提取；“项目名称”即使含有编码式片段也不构成项目编号。原文必须保留标签与编号值；同一编号重复出现时按首次出现顺序去重，归属不明时输出 ambiguous。
+    examples:
+      - source_text: "项目编号：XM-2025-018"
+        output: ["XM-2025-018"]
+
+  - field_id: delivery_commitment
+    name: 交付期限
+    meaning: 合同对货物交付、成果提交或主要服务交付约定的确定日期、相对期间及起算条件。
+    aliases: [交货期, 交付时间, 交付日期, 供货周期, 到货时间, 完成期限]
+    not_meaning: [合同有效期, 质保期, 付款期限, 发票开具期限, 保密期限]
+    output:
+      type: object
+      format: "{deadline_date: date|null, period_text: string|null, trigger_text: string|null}"
+      nullable: true
+      required: [deadline_date, period_text, trigger_text]
+      additional_properties: false
+      properties:
+        deadline_date:
+          name: 明确交付日期
+          meaning: 合同直接写明的货物、成果或主要服务的规范化交付截止日期
+          type: date
+          format: YYYY-MM-DD
+          nullable: true
+          not_meaning: [合同签订日期, 生效日期本身, 验收日期, 质保截止日]
+          extraction_rule: 仅提取原文明示的确定日期；相对期限不得由模型自行做日历计算。
+        period_text:
+          name: 交付相对期间
+          meaning: 合同约定但未直接写成确定日期的交付时长或期间原文
+          type: string
+          nullable: true
+          not_meaning: [合同期限, 付款账期, 质保期]
+          extraction_rule: 保留例如“30日内”“收到订单后六周内”的最小必要期间原文，不擅自换算截止日期。
+        trigger_text:
+          name: 交付起算条件
+          meaning: 交付相对期间开始计算所依赖的事件或条件原文
+          type: string
+          nullable: true
+          not_meaning: [与交付无关的合同生效机制, 付款条件本身]
+          extraction_rule: 仅保留与当前交付期限直接绑定的起算事件，例如“合同生效后”或“收到预付款之日起”。
+      example: {deadline_date: null, period_text: 30日内, trigger_text: 合同生效后}
+    extraction_rule: 只抽取主要货物、成果或服务的交付期限，不把合同有效期、付款期限或质保期写入本字段；确定日期与相对期间分别保存，至少一个子字段必须有合同证据，否则整体输出 not_found 或 not_applicable。
+    examples:
+      - source_text: "乙方应在合同生效后30日内完成交货。"
+        output: {deadline_date: null, period_text: 30日内, trigger_text: 合同生效后}
+
+  - field_id: delivery_locations
+    name: 交付地点
+    meaning: 合同明确约定的收货、安装、施工、成果提交或主要服务履行地点。
+    aliases: [交货地点, 交付地点, 收货地址, 安装地点, 项目地点, 履约地点]
+    not_meaning: [合同主体注册地址, 通讯地址, 开票地址, 仲裁地点, 管辖法院所在地]
+    output:
+      type: array
+      format: "[string]，按首次出现顺序去重，保留合同中的地点表达"
+      nullable: true
+      min_items: 1
+      items:
+        name: 单个交付地点
+        meaning: 与货物、成果或主要服务交付义务直接对应的一个地点
+        type: string
+        nullable: false
+        not_meaning: [主体注册地址, 开票地址, 争议解决地点]
+        extraction_rule: 保留合同可核对的完整地点表达，不借助地图或外部知识补全行政区划。
+      example: ["甲方指定的深圳市南山区项目现场"]
+    extraction_rule: 地点必须与交付、收货、安装、施工或主要服务履行义务明确绑定；“甲方指定地点”等未给出具体地址的约定仍应忠实保留，不得用合同主体地址替代。
+    examples:
+      - source_text: "交货地点：甲方指定的深圳市南山区项目现场"
+        output: ["甲方指定的深圳市南山区项目现场"]
+
+  - field_id: payment_schedule
+    name: 付款安排
+    meaning: 合同对价款分期支付所约定的阶段、触发条件、比例或金额以及支付期限。
+    aliases: [付款方式, 付款计划, 付款节点, 支付安排, 结算方式]
+    not_meaning: [合同总金额, 收款账户, 发票金额, 违约金, 仅有付款账户而无付款约定]
+    output:
+      type: array
+      format: "[{stage_name: string|null, trigger_text: string|null, ratio: number|null, amount: number|null, currency: string|null, due_text: string|null}]"
+      nullable: true
+      min_items: 1
+      items:
+        type: object
+        nullable: false
+        required: [stage_name, trigger_text, ratio, amount, currency, due_text]
+        additional_properties: false
+        properties:
+          stage_name:
+            name: 付款阶段名称
+            meaning: 合同赋予当前付款节点的预付款、到货款、验收款、尾款等名称
+            type: string
+            nullable: true
+            extraction_rule: 优先保留原文阶段名称；原文没有名称时不得自行创造。
+          trigger_text:
+            name: 付款触发条件
+            meaning: 当前付款义务发生前需要完成的交付、验收、开票或其他事件
+            type: string
+            nullable: true
+            extraction_rule: 只保留付款义务发生前的事件或条件。若同一句同时出现起算事件和付款期限，必须剥离期限；没有触发事件时为 null。
+          ratio:
+            name: 付款比例
+            meaning: 当前付款节点占合同约定计价基数的百分比
+            type: number
+            unit: percent
+            nullable: true
+            minimum: 0
+            maximum: 100
+            extraction_rule: 输出30表示30%而不是0.3；未明确比例时不得根据金额和合同总额反推。
+          amount:
+            name: 付款金额
+            meaning: 合同明确写明的当前付款节点金额
+            type: number
+            nullable: true
+            minimum: 0
+            not_meaning: [合同总金额, 其他付款节点金额, 违约金]
+            extraction_rule: 只提取当前节点明示金额，不用比例与合同总额计算。
+          currency:
+            name: 付款币种
+            meaning: 当前付款节点金额使用的币种
+            type: string
+            format: ISO-4217 三字母大写代码
+            nullable: true
+            pattern: "^[A-Z]{3}$"
+            extraction_rule: 人民币规范化为 CNY；不得仅凭合同语言或主体所在地推断。
+          due_text:
+            name: 付款期限
+            meaning: 当前付款节点触发后应当完成付款的期限原文
+            type: string
+            nullable: true
+            extraction_rule: 只保留付款应完成的期限或确定付款日，例如“10个工作日内”“2025年6月30日前”。若仅写“卖方具备交付产品时”等触发条件而未约定期限，则为 null；不得复制 trigger_text。
+      example:
+        - {stage_name: 预付款, trigger_text: 合同生效且收到发票后, ratio: 30, amount: null, currency: null, due_text: 10个工作日内}
+    extraction_rule: 按合同顺序逐项提取付款节点；每个节点至少应有触发条件、比例、金额或期限之一，不保存银行账号。同一句中同时出现事件和期限时分别填入 trigger_text 与 due_text。付款比例和金额只采用原文明示值，不根据 Core 合同总额进行计算或补全。
+    examples:
+      - source_text: "合同生效且收到发票后10个工作日内支付合同总价的30%作为预付款。"
+        output:
+          - {stage_name: 预付款, trigger_text: 合同生效且收到发票后, ratio: 30, amount: null, currency: null, due_text: 10个工作日内}
+
+  - field_id: invoice_requirement
+    name: 发票要求
+    meaning: 合同对价款开票所明确约定的票据类型、开票税率和开票时点。
+    aliases: [发票类型, 开票要求, 增值税发票, 专用发票, 普通发票]
+    not_meaning: [合同金额是否含税, 合同总额税率, 发票抬头, 银行账户, 已开具的历史发票]
+    output:
+      type: object
+      format: "{invoice_type: vat_special|vat_general|electronic|receipt|other|null, tax_rate: number|null, timing_text: string|null}"
+      nullable: true
+      required: [invoice_type, tax_rate, timing_text]
+      additional_properties: false
+      properties:
+        invoice_type:
+          name: 发票类型
+          meaning: 合同明确要求开具的发票或票据类别
+          type: enum
+          nullable: true
+          values:
+            vat_special: 增值税专用发票
+            vat_general: 增值税普通发票
+            electronic: 只明确要求电子发票但未明确增值税专票或普票
+            receipt: 收据
+            other: 明确要求但不属于以上类别的其他票据
+          extraction_rule: 只根据明确票据名称分类；仅写“发票”而没有类别时为 null，不得猜测专票或普票。
+        tax_rate:
+          name: 开票税率
+          meaning: 与当前发票要求直接绑定的增值税税率
+          type: number
+          unit: percent
+          nullable: true
+          minimum: 0
+          maximum: 100
+          not_meaning: [从合同含税价反推的税率, 与其他项目对应的税率]
+          extraction_rule: 输出13表示13%而不是0.13；必须由发票约定直接支撑，不得从 Core 的 contract_amount.tax_rate 复制。
+        timing_text:
+          name: 开票时点
+          meaning: 合同明确约定开具或提交发票的时间、阶段或触发条件
+          type: string
+          nullable: true
+          extraction_rule: 保留与开票直接绑定的最小必要原文，不把付款期限改写为开票时点。
+      example: {invoice_type: vat_special, tax_rate: 13, timing_text: 发货前开具}
+    extraction_rule: 发票类型、税率和时点分别依据合同原文提取；允许仅命中部分子字段。Core 结果只用于理解交易背景，不能作为发票类型或开票税率的合同证据。
+    examples:
+      - source_text: "乙方应在发货前开具税率为13%的增值税专用发票。"
+        output: {invoice_type: vat_special, tax_rate: 13, timing_text: 发货前开具}
+
+  - field_id: acceptance_mechanism
+    name: 验收机制
+    meaning: 合同对货物、成果或服务验收所约定的标准、期限及逾期未反馈是否视为验收通过。
+    aliases: [验收标准, 验收方式, 验收期限, 验收条件, 视为验收]
+    not_meaning: [质量保证期, 交付期限, 一般质量承诺, 付款条件, 验收款支付期限, 尾款支付期限, 试用期]
+    output:
+      type: object
+      format: "{standard_text: string|null, deadline_text: string|null, deemed_accepted: boolean|null}"
+      nullable: true
+      required: [standard_text, deadline_text, deemed_accepted]
+      additional_properties: false
+      properties:
+        standard_text:
+          name: 验收标准
+          meaning: 用于判断货物、成果或服务是否通过验收的合同标准
+          type: string
+          nullable: true
+          extraction_rule: 保留标准名称、附件引用或最小必要标准原文，不概括完整验收条款。
+        deadline_text:
+          name: 验收期限
+          meaning: 收货、安装、提交成果或提出异议后的验收时限
+          type: string
+          nullable: true
+          extraction_rule: 保留验收行为、验收标准、收货/安装/成果提交后的验收或提出异议期限及其起算条件。仅约定“支付验收款”“尾款支付”或其他付款期限时为 null，不得作为验收期限。
+        deemed_accepted:
+          name: 是否约定视为验收通过
+          meaning: 合同是否明确规定逾期未验收或未提出异议即视为验收合格
+          type: boolean
+          nullable: true
+          extraction_rule: 明示视为验收通过时填 true，明示不得视为通过时填 false，未提及则为 null。
+      example: {standard_text: 按合同附件技术规格验收, deadline_text: 到货后5个工作日内, deemed_accepted: true}
+    extraction_rule: 只提取针对主要标的的验收安排，不把一般质量保证、付款前置条件、验收款付款期限或尾款付款期限单独当作验收机制；允许部分子字段为空，完整条款仍由 Clause 保存。
+    examples:
+      - source_text: "甲方应在到货后5个工作日内按附件技术规格验收，逾期未提出书面异议视为验收合格。"
+        output: {standard_text: 按合同附件技术规格验收, deadline_text: 到货后5个工作日内, deemed_accepted: true}
+
+  - field_id: warranty_commitment
+    name: 质保承诺
+    meaning: 合同对主要货物、成果或服务明确约定的质量保证期间及其起算条件。
+    aliases: [质保期, 保修期, 质量保证期, 免费维修期, 售后质保]
+    not_meaning: [合同有效期, 验收期限, 服务期限, 保密期限, 产品设计寿命]
+    output:
+      type: object
+      format: "{duration_months: integer|null, duration_text: string|null, start_trigger_text: string|null}"
+      nullable: true
+      required: [duration_months, duration_text, start_trigger_text]
+      additional_properties: false
+      properties:
+        duration_months:
+          name: 规范化质保月数
+          meaning: 能从明确的年数或月数无歧义换算得到的质保期间月数
+          type: integer
+          nullable: true
+          minimum: 0
+          extraction_rule: 一年规范化为12，18个月规范化为18；按日、条件截止或无法确定时为 null。
+        duration_text:
+          name: 质保期间原文
+          meaning: 合同明确约定的质保或保修期间原文
+          type: string
+          nullable: true
+          extraction_rule: 忠实保留“一年”“验收合格后12个月”等期间表达，不只保留换算结果。
+        start_trigger_text:
+          name: 质保起算条件
+          meaning: 质保期间开始计算所依赖的交付、安装、验收或其他事件
+          type: string
+          nullable: true
+          extraction_rule: "只提取‘自/从……起’、‘……之日起’、‘验收合格后’等与质保期间直接绑定的起算条件；仅写‘在质保期内’的责任描述不构成起算条件，应为 null。"
+      example: {duration_months: 12, duration_text: 一年, start_trigger_text: 验收合格之日起}
+    extraction_rule: 仅提取合同明示的质保或保修期间；不以产品寿命、合同有效期或一般质量承诺替代。规范化月数必须可以由原文年数或月数直接换算，同时保留 duration_text。
+    examples:
+      - source_text: "质保期为验收合格之日起一年。"
+        output: {duration_months: 12, duration_text: 一年, start_trigger_text: 验收合格之日起}
+
+  - field_id: performance_security
+    name: 履约保障
+    meaning: 合同明确约定的履约保证金、质量保证金、保函或其他履约担保安排。
+    aliases: [履约保证金, 质保金, 质量保证金, 履约保函, 银行保函]
+    not_meaning: [预付款, 一般付款阶段, 违约金, 定金, 未与履约保障绑定的尾款]
+    output:
+      type: object
+      format: "{security_type: performance_deposit|quality_retention|bank_guarantee|other|null, amount: number|null, ratio: number|null, currency: string|null, release_trigger_text: string|null}"
+      nullable: true
+      required: [security_type, amount, ratio, currency, release_trigger_text]
+      additional_properties: false
+      properties:
+        security_type:
+          name: 履约保障类型
+          meaning: 合同明确采用的履约保障形式
+          type: enum
+          nullable: true
+          values:
+            performance_deposit: 履约保证金
+            quality_retention: 从合同价款中保留的质保金或质量保证金
+            bank_guarantee: 银行或金融机构出具的履约保函
+            other: 明确存在但不属于以上类别的履约保障
+          extraction_rule: 按合同明确名称和用途分类；普通尾款只有明确承担质保金作用时才归为 quality_retention。
+        amount:
+          name: 履约保障金额
+          meaning: 合同明确写明的履约保障金额
+          type: number
+          nullable: true
+          minimum: 0
+          not_meaning: [合同总额, 预付款, 违约金]
+          extraction_rule: 只提取明示金额，不根据比例与合同总额计算。
+        ratio:
+          name: 履约保障比例
+          meaning: 履约保障占合同约定计价基数的百分比
+          type: number
+          unit: percent
+          nullable: true
+          minimum: 0
+          maximum: 100
+          extraction_rule: 输出5表示5%而不是0.05；未明确比例时不得反推。
+        currency:
+          name: 履约保障币种
+          meaning: 履约保障金额使用的币种
+          type: string
+          format: ISO-4217 三字母大写代码
+          nullable: true
+          pattern: "^[A-Z]{3}$"
+          extraction_rule: 只有金额存在且币种有合同依据时填写；人民币规范化为 CNY。
+        release_trigger_text:
+          name: 返还或解除条件
+          meaning: 保证金返还、质保金支付或保函解除所依赖的事件和期限
+          type: string
+          nullable: true
+          extraction_rule: 保留与当前履约保障直接绑定的最小必要条件原文。
+      example: {security_type: quality_retention, amount: null, ratio: 5, currency: null, release_trigger_text: 质保期满且无质量问题后支付}
+    extraction_rule: 只有合同明确设置履约保证金、质保金、保函或同等保障时才提取；普通分期付款、违约责任或没有保障用途的尾款不属于本字段。若同一合同存在多种独立保障且无法由单一对象忠实表达，输出 ambiguous 并在 reason 中列明候选，不擅自合并金额和条件。
+    examples:
+      - source_text: "合同总价的5%作为质保金，质保期满且无质量问题后支付。"
+        output: {security_type: quality_retention, amount: null, ratio: 5, currency: null, release_trigger_text: 质保期满且无质量问题后支付}
+
+  - field_id: dispute_resolution
+    name: 争议解决方式
+    meaning: 合同协商未果后明确约定的最终诉讼或仲裁机制、机构以及管辖表达。
+    aliases: [争议解决, 纠纷解决, 管辖法院, 仲裁委员会, 仲裁机构]
+    not_meaning: [友好协商本身, 一般法律适用条款, 合同履行地点, 送达地址]
+    output:
+      type: object
+      format: "{mechanism: litigation|arbitration|null, institution_name: string|null, jurisdiction_text: string|null}"
+      nullable: true
+      required: [mechanism, institution_name, jurisdiction_text]
+      additional_properties: false
+      properties:
+        mechanism:
+          name: 最终争议解决机制
+          meaning: 协商未果后进入诉讼或仲裁的最终处理方式
+          type: enum
+          nullable: true
+          values:
+            litigation: 向人民法院提起诉讼
+            arbitration: 向仲裁机构申请仲裁
+          extraction_rule: 仅约定协商而没有诉讼或仲裁安排时为 null；诉讼和仲裁同时作为互斥终局方式且无法判断优先关系时标记 conflicting。
+        institution_name:
+          name: 法院或仲裁机构名称
+          meaning: 合同直接指定的人民法院、仲裁委员会或仲裁机构名称
+          type: string
+          nullable: true
+          extraction_rule: 忠实保留可唯一识别的具体法院或仲裁机构名称，例如“深圳市南山区人民法院”。“甲方所在地人民法院”“买方当地人民法院”“有管辖权的人民法院”等关系性地域描述不是机构名称，必须为 null，并只保留在 jurisdiction_text。
+        jurisdiction_text:
+          name: 管辖约定原文
+          meaning: 对法院、仲裁机构或管辖地域作出限定的最小必要原文
+          type: string
+          nullable: true
+          extraction_rule: 保留例如“向甲方所在地有管辖权的人民法院起诉”的完整限定，不根据主体地址补全具体法院。
+      example: {mechanism: litigation, institution_name: null, jurisdiction_text: 向甲方所在地有管辖权的人民法院提起诉讼}
+    extraction_rule: 提取协商未果后的最终争议处理安排；协商只是前置程序，不单独构成 litigation 或 arbitration。不得用 Core 主体地址推断法院或仲裁机构，完整条款仍由 Clause 保存。
+    examples:
+      - source_text: "协商不成的，任何一方可向甲方所在地有管辖权的人民法院提起诉讼。"
+        output: {mechanism: litigation, institution_name: null, jurisdiction_text: 向甲方所在地有管辖权的人民法院提起诉讼}

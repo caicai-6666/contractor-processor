@@ -1,27 +1,34 @@
 """Core 元数据结构与统一值包络的回归测试。"""
 
+import asyncio
 from pathlib import Path
 
 import pytest
 import yaml
+from pydantic import ValidationError
 
 from contract_processor.application.prompts.core_fields import build_compact_field_prompt
 from contract_processor.application.schemas.core_extraction import (
     build_core_extraction_schema,
 )
 from contract_processor.domain.enums import ExtractionStatus, FieldKind
-from contract_processor.domain.models import FieldObservation
+from contract_processor.domain.models import Contract, FieldObservation
+from contract_processor.infrastructure.extraction.field_values import (
+    ObjectPropertyValue,
+    ScalarFieldValue,
+)
 from contract_processor.infrastructure.persistence.yaml_field_catalog import YamlFieldCatalog
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-CORE_YAML = PROJECT_ROOT / "description/fields/core/core.yaml"
+CORE_YAML = PROJECT_ROOT / "data/definitions/core.yaml"
 
 
 def observation(
     *,
     status: ExtractionStatus,
     value: object = None,
+    raw_value: str | None = None,
 ) -> FieldObservation:
     return FieldObservation(
         field_id="example",
@@ -29,8 +36,8 @@ def observation(
         meaning="示例字段",
         status=status,
         value=value,
-        raw_value=None,
-        contract_id="contract-1",
+        raw_value=raw_value,
+        document_id="a" * 64,
     )
 
 
@@ -38,11 +45,66 @@ def test_core_catalog_uses_new_semantic_dimensions() -> None:
     payload = yaml.safe_load(CORE_YAML.read_text(encoding="utf-8"))
     field_ids = [field["field_id"] for field in payload["fields"]]
 
-    assert payload["schema_version"] == "0.9"
+    assert payload["schema_version"] == "1.1"
     assert len(field_ids) == len(set(field_ids))
     assert {"document_role", "transaction_type", "contract_form"} <= set(field_ids)
     assert {"effective_mechanism", "contract_validity_period"} <= set(field_ids)
     assert {"contract_type", "effective_date", "contract_term"}.isdisjoint(field_ids)
+
+
+def test_contract_number_is_nullable_and_schema_allows_truthful_failure_status() -> None:
+    """合同编号是可空业务字段，缺失时不能阻断合同处理。"""
+
+    jsonschema = pytest.importorskip("jsonschema")
+    payload = yaml.safe_load(CORE_YAML.read_text(encoding="utf-8"))
+    contract_number = next(
+        field for field in payload["fields"] if field["field_id"] == "contract_number"
+    )
+    schema = build_core_extraction_schema([contract_number])
+    value_schema = schema["properties"]["fields"]["properties"]["contract_number"][
+        "properties"
+    ]["value"]
+
+    assert contract_number["output"]["nullable"] is True
+    assert {"type": "null"} in value_schema["anyOf"]
+    assert "文档唯一标识由程序根据原始 PDF 文件字节计算" in contract_number[
+        "extraction_rule"
+    ]
+    diagnostic_result = {
+        "fields": {
+            "contract_number": {
+                "raw_value": None,
+                "reason": "已检查可见页面，未找到当前合同编号。",
+                "status": "not_found",
+                "value": None,
+            }
+        },
+    }
+    assert not list(jsonschema.Draft202012Validator(schema).iter_errors(diagnostic_result))
+
+
+def test_contract_requires_sha256_document_id() -> None:
+    with pytest.raises(ValueError, match="64 位小写 SHA-256"):
+        Contract(document_id="HT-001", source_name="contract.pdf")
+
+    document_id = "a" * 64
+    assert (
+        Contract(document_id=document_id, source_name="contract.pdf").document_id
+        == document_id
+    )
+
+
+def test_field_observation_rejects_non_sha256_document_id() -> None:
+    with pytest.raises(ValueError, match="64 位小写 SHA-256"):
+        FieldObservation(
+            field_id="example",
+            name="示例",
+            meaning="示例字段",
+            raw_value=None,
+            status=ExtractionStatus.NOT_FOUND,
+            value=None,
+            document_id="HT-001",
+        )
 
 
 def test_complex_outputs_have_recursive_child_definitions() -> None:
@@ -172,11 +234,9 @@ def test_generated_envelope_schema_keeps_ordered_scalar_shape() -> None:
         "status",
         "value",
     ]
-    assert schema["required"] == [
-        "document_id",
-        "fields",
-    ]
-    assert list(schema["properties"]) == ["document_id", "fields"]
+    assert envelope_schema["properties"]["reason"]["maxLength"] == 400
+    assert schema["required"] == ["fields"]
+    assert list(schema["properties"]) == ["fields"]
     # 平坦生成 Schema 只负责单属性结构；found/null 矛盾留给应用层业务校验。
     assert not list(validator.iter_errors(found_with_null))
 
@@ -217,13 +277,52 @@ def test_object_schema_wraps_each_direct_property_in_decision_envelope() -> None
     ]
     for child in property_schemas["properties"].values():
         assert child["required"] == ["raw_value", "reason", "status", "value"]
+        assert child["properties"]["reason"]["maxLength"] == 400
+
+
+def test_field_reason_allows_400_characters_but_rejects_401() -> None:
+    accepted_reason = "判" * 400
+    rejected_reason = "判" * 401
+
+    scalar = ScalarFieldValue(
+        raw_value=None,
+        reason=accepted_reason,
+        status="not_found",
+        value=None,
+    )
+    child = ObjectPropertyValue(
+        raw_value=None,
+        reason=accepted_reason,
+        status="not_found",
+        value=None,
+    )
+
+    assert len(scalar.reason) == 400
+    assert len(child.reason) == 400
+    with pytest.raises(ValidationError):
+        ScalarFieldValue(
+            raw_value=None,
+            reason=rejected_reason,
+            status="not_found",
+            value=None,
+        )
+    with pytest.raises(ValidationError):
+        ObjectPropertyValue(
+            raw_value=None,
+            reason=rejected_reason,
+            status="not_found",
+            value=None,
+        )
 
 
 def test_field_catalog_preserves_recursive_output_definitions(tmp_path: Path) -> None:
     empty_attributes = tmp_path / "attribute.yaml"
     empty_attributes.write_text("fields: []\n", encoding="utf-8")
     catalog = YamlFieldCatalog(core_path=CORE_YAML, attribute_path=empty_attributes)
-    definitions = {item.field_id: item for item in catalog.load(FieldKind.CORE)}
+    definitions = {
+        item.field_id: item
+        for item in asyncio.run(catalog.load(FieldKind.CORE))
+    }
 
     amount = definitions["contract_amount"].output
     assert amount.property("tax_rate").unit == "percent"
@@ -271,3 +370,13 @@ def test_found_observation_requires_value() -> None:
 def test_ambiguous_and_conflicting_states_do_not_require_candidate_payloads() -> None:
     assert observation(status=ExtractionStatus.AMBIGUOUS).value is None
     assert observation(status=ExtractionStatus.CONFLICTING).value is None
+
+
+def test_not_found_observation_can_retain_related_raw_text() -> None:
+    result = observation(
+        status=ExtractionStatus.NOT_FOUND,
+        raw_value="有效期内无质量问题不接受退货、换货",
+    )
+
+    assert result.value is None
+    assert result.raw_value == "有效期内无质量问题不接受退货、换货"

@@ -1,0 +1,55 @@
+schema_version: "0.8"
+status: experiment
+mode: direct_pdf
+description: 直接读取原始 PDF，一次提取六个固定摘要栏目，并对失败栏目执行局部重试。
+
+retry_invalid_sections: true
+max_retries_per_section: 1
+
+sections:
+  contract_number:
+    title: 合同编号
+    required: false
+    output_mode: scalar
+    instruction: >
+      只提取当前合同自身明确标注的合同号或协议号，逐字保留格式；不得使用项目编号、
+      订单号、原合同编号、税号、账号或文件名替代。
+  contract_title:
+    title: 合同标题
+    required: false
+    output_mode: scalar
+    instruction: >
+      只使用首页、标题页或正文明确呈现的正式标题，不使用文件名，不根据内容概括标题。
+  parties:
+    title: 相关方
+    required: false
+    output_mode: party_items
+    instruction: >
+      summary_items 每项严格输出 role 和 name；role 只写明确业务角色或原文称谓，name 只写一个主体完整名称，
+      均不附加冒号等展示符号。只包含合同权利义务主体，排除联系人、法定代表人、委托代理人、开户行、
+      账号、税号和统一社会信用代码。
+  time:
+    title: 时间
+    required: false
+    output_mode: time_items
+    instruction: >
+      summary_items 每项严格输出 type 和 text；type 只能是 signing_date、effective_date、
+      effective_info、validity_period，text 只写事实正文且不重复中文标签。只表达签订日期、
+      明确生效信息和合同整体有效期；排除付款期、交付期、验收期、质保期、售后期和签署页
+      主体/银行信息；不得把签订日期解释为生效依据，不得根据签章版面推断生效机制。
+  main_content:
+    title: 主要内容
+    required: false
+    output_mode: scalar
+    instruction: >
+      用一到两句表达交易主体、合同类型、主要标的、明确合同总金额和必要产品/服务说明；
+      不计算总额，不输出银行税务资料或详细履约条款。
+  key_performance_terms:
+    title: 关键履约约定
+    required: false
+    output_mode: performance_items
+    instruction: >
+      summary_items 每项严格输出 type 和 text；type 只能是 payment、delivery_service、acceptance、
+      quality_warranty、breach_termination、dispute_resolution，并按该顺序输出，每种类型最多一项；
+      text 只写该类明确约定，不附加中文类别标签或冒号。合并重复事实，排除普通套话和签署效力。
+      某一类型没有可靠原文时直接省略该项，不得输出“无明确”“未约定”等缺失说明。

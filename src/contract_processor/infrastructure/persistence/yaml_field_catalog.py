@@ -5,8 +5,14 @@ from typing import Any
 
 import yaml
 
+from contract_processor.async_utils import run_blocking
 from contract_processor.domain.enums import FieldKind
-from contract_processor.domain.models import FieldDefinition, FieldExample, OutputDefinition
+from contract_processor.domain.models import (
+    FieldCatalogSnapshot,
+    FieldDefinition,
+    FieldExample,
+    OutputDefinition,
+)
 
 
 class YamlFieldCatalog:
@@ -15,11 +21,52 @@ class YamlFieldCatalog:
     def __init__(self, *, core_path: Path, attribute_path: Path) -> None:
         self._paths = {FieldKind.CORE: core_path, FieldKind.ATTRIBUTE: attribute_path}
 
-    def load(self, kind: FieldKind) -> list[FieldDefinition]:
+    async def load(self, kind: FieldKind) -> list[FieldDefinition]:
+        """在线程中完成小型配置文件读取，避免阻塞事件循环。"""
+
+        snapshot = await self.snapshot(kind)
+        return list(snapshot.definitions)
+
+    async def snapshot(self, kind: FieldKind) -> FieldCatalogSnapshot:
+        """读取并校验本次运行使用的稳定字段目录快照。"""
+
+        return await run_blocking(self._load_snapshot_sync, kind)
+
+    def _load_snapshot_sync(self, kind: FieldKind) -> FieldCatalogSnapshot:
         path = self._paths[kind]
         payload = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-        records = payload.get("fields", [])
-        return [self._to_definition(record, kind) for record in records]
+        if not isinstance(payload, dict):
+            raise RuntimeError(f"{kind.value} 字段目录根节点必须是对象。")
+        if payload.get("field_set") != kind.value:
+            raise RuntimeError(
+                f"{kind.value} 字段目录的 field_set 必须为 {kind.value}。"
+            )
+        if "schema_version" not in payload:
+            raise RuntimeError(f"{kind.value} 字段目录缺少 schema_version。")
+        if "status" not in payload or not isinstance(payload["status"], str):
+            raise RuntimeError(f"{kind.value} 字段目录必须声明字符串 status。")
+        records = payload.get("fields")
+        if not isinstance(records, list):
+            raise RuntimeError(f"{kind.value} 字段目录的 fields 必须是数组。")
+        status = payload["status"]
+        if status == "empty" and records:
+            raise RuntimeError(
+                f"{kind.value} 字段目录 status=empty 时 fields 必须为空。"
+            )
+        if status != "empty" and not records:
+            raise RuntimeError(
+                f"{kind.value} 字段目录没有字段时必须显式声明 status=empty。"
+            )
+        definitions = tuple(self._to_definition(record, kind) for record in records)
+        field_ids = [definition.field_id for definition in definitions]
+        if len(field_ids) != len(set(field_ids)):
+            raise RuntimeError(f"{kind.value} 字段目录包含重复 field_id。")
+        return FieldCatalogSnapshot(
+            kind=kind,
+            schema_version=str(payload["schema_version"]),
+            status=status,
+            definitions=definitions,
+        )
 
     @staticmethod
     def _to_output_definition(output: dict[str, Any]) -> OutputDefinition:

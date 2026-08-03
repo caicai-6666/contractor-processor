@@ -9,6 +9,8 @@ models:
     model: REPLACE_WITH_VL_MODEL
     endpoint: chat_completions
     timeout_seconds: 300
+    # 单合同的 Core→Attribute、Clause、Abstract 三条业务线路共享该并发配额。
+    max_concurrent_requests: 3
     # 必须与 vLLM 的 --max-model-len 保持一致；当前 Instruct 服务示例使用 65536。
     context_window_tokens: 65536
     generation:
@@ -32,6 +34,9 @@ models:
     endpoint: embeddings
     timeout_seconds: 60
     batch_size: 32
+    max_concurrent_requests: 3
+    # Qwen3-VL-Embedding-2B 的完整输出维度为 2048。
+    dimensions: 2048
     normalize: true
 
   reranker:
@@ -47,10 +52,41 @@ models:
 
 paths:
   input_contracts: data/input
-  core_fields: description/fields/core/core.yaml
-  attribute_fields: description/fields/attribute/attribute.yaml
+  core_fields: data/definitions/core.yaml
+  attribute_fields: data/definitions/attribute.yaml
+  discovery_core_fields: data/definitions/discovery/core.yaml
+  discovery_attribute_fields: data/definitions/discovery/attribute.yaml
+  clause_fields: data/definitions/clause.yaml
+  contract_summary_policy: data/definitions/contract_summary.yaml
+  contract_embedding_policy: data/definitions/contract_embedding.yaml
+  # 原始 PDF 按 <document_id>.pdf 保存；该目录必须位于持久化磁盘。
+  source_documents: data/contracts
   runtime_data: data
 
 processing:
   # 默认逐页在内存中渲染并直接发送给 MLLM；仅排障时才持久化页面图像。
   persist_page_artifacts: false
+
+runtime:
+  # production 要求 Core 非空；discovery 同时支持空 Core 与非空 Core。
+  mode: production
+
+ingestion:
+  # 值为 JSON 公司名称数组的环境变量名，名称本身不得写进 YAML。
+  own_company_names_env: CONTRACT_PROCESSOR_OWN_COMPANY_NAMES
+
+elasticsearch:
+  # 生产部署建议使用 HTTPS、专用 CA 与环境变量凭据。
+  hosts: [https://localhost:9200]
+  username_env: ELASTICSEARCH_USERNAME
+  password_env: ELASTICSEARCH_PASSWORD
+  # 将 Elasticsearch 的 http_ca.crt 复制到 data/certs/ 后填此相对路径。
+  ca_certs: data/certs/http_ca.crt
+  verify_certs: true
+  index_name: contracts-v1
+  # 验收运行会先删除并重建此索引；名称必须保留 experiment 安全标记。
+  ingestion_experiment_index_name: contracts-ingestion-experiment-v1
+  # 正式入库已启用，必须与 embedding 模型实际输出维度一致。
+  vector_dimensions: 2048
+  number_of_shards: 1
+  number_of_replicas: 0
