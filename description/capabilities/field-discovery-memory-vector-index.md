@@ -26,21 +26,21 @@
 
 ## 对外接口与使用方式
 
-第一大步统一实验流水线中的 `CandidateVectorPool` 位于
-[`experiments/field_discovery_stage_one/discovery.py`](../../experiments/field_discovery_stage_one/discovery.py)。
+正式 `CandidateVectorPool` 位于
+[`src/contract_processor/infrastructure/field_discovery/candidate_pipeline.py`](../../src/contract_processor/infrastructure/field_discovery/candidate_pipeline.py)。
 它通过三个 `SimpleVectorStore` 分别维护名称、含义和结构视角；`top_matches(...)` 返回已融合并
 去重的领域 `CandidateMatch`，不向上层泄漏 LlamaIndex Node。调用方只传本批次已获独立身份的新
-候选，固定 Discovery Core/Attribute 始终不进入池中。
+候选，固定 Discovery Core/Attribute 始终不进入池中。历史实验入口从正式模块重新导出同一实现。
 
 > **接口边界：** 上层只接触领域 `CandidateMatch`；LlamaIndex 的 `TextNode`、向量存储和相似度实现不向应用层泄漏。
 
 第一个门禁通过的候选直接写入空池；后续候选先查询当前池，再根据完整 Top 5 的 LLM 三分类和
 确定性规则决定复用或创建身份。全部 `same` / `related_distinct` 边用于维护治理关系图连通分量，
 不再只选择一个最高分锚点组。一次批处理结束即释放整个对象，
-不为每份合同创建独立索引。正式 `FieldDiscoveryService` 尚未迁移，生产 discovery 入口仍会在
-没有服务时明确失败。
+不为每份合同创建独立索引。正式 `StructuredFieldDiscoveryService` 在整批合同间共享该池，
+并在第一阶段收敛完成后统一释放。
 
-> **当前状态：** 该能力已在第一大步实验流水线实现；正式 `FieldDiscoveryService` 尚未迁移，生产 discovery 入口会明确拒绝执行。
+> **当前状态：** 该能力已迁入正式 discovery 基础设施；CLI 与历史实验入口使用同一实现。
 
 ---
 
@@ -57,8 +57,9 @@
 - **召回不裁决**：Top 5 只提供局部比较集合；`same`、`related_distinct`、`unrelated` 由模型
   判断，身份和关系图分量由应用层确定性规则决定。RRF 分数是排名融合值，不是 0~1 概率；产物
   同时记录名称、含义、结构三个视角的原始相似度和名次，以便基于人工标签校准阈值。
-- **实验隔离**：LlamaIndex `TextNode` 和 `SimpleVectorStore` 当前仅存在于第一大步实验；正式
-  应用层迁移时才会通过领域端口隔离该实现细节。
+- **基础设施隔离**：LlamaIndex `TextNode` 和 `SimpleVectorStore` 只存在于
+  `infrastructure/field_discovery/` 的批次候选池，既不进入应用 DTO，也不写 Elasticsearch；
+  历史实验入口复用该正式实现。
 
 > **裁决边界：** 向量召回只缩小对比范围。`same`、`related_distinct`、`unrelated` 由模型判断，身份与关系图分量由确定性规则维护。
 
@@ -70,8 +71,8 @@
 - 候选写入向量和查询向量必须使用同一 Embedding 模型、指令和维度；
 - 内存占用随字段数和向量维度线性增长，适用于当前批次字段目录，不用于大规模合同正文库；
 - 进程退出或搜索器对象释放后索引不可恢复，这是批处理设计的预期行为。
-- 增量多视角候选池和冻结后的组级收敛已在同一实验流水线实现；第二阶段全合同集回扫、候选
-  统计和正式应用服务仍待实现，
-  完整协议见 [字段发现两阶段工作流](../architecture/field-discovery-workflow.md)。
+- 增量多视角候选池、冻结后的组级收敛、第二阶段全合同集回扫和统计均已由正式 discovery
+  批次用例实现；完整协议见
+  [字段发现两阶段工作流](../architecture/field-discovery-workflow.md)。
 
 > **存储原则：** 不读取、不写入 Elasticsearch，也不配置跨批次持久化索引；进程退出后索引不可恢复正是该批处理设计的预期行为。

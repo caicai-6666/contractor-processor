@@ -126,3 +126,30 @@ class YamlFieldCatalog:
             examples=examples,
             kind=kind,
         )
+
+    @staticmethod
+    def parse_definition_record(
+        record: dict[str, Any], kind: FieldKind
+    ) -> FieldDefinition:
+        """把内存中的机器字段记录编译为领域定义，供收敛与回扫复用。"""
+
+        if not isinstance(record, dict):
+            raise TypeError("字段定义必须是对象。")
+        allowed = {
+            "field_id",
+            "name",
+            "meaning",
+            "aliases",
+            "not_meaning",
+            "output",
+            "extraction_rule",
+            "examples",
+        }
+        unknown = sorted(set(record) - allowed)
+        if unknown:
+            raise ValueError(f"字段定义包含未治理的额外键：{unknown}。")
+        required = {"field_id", "name", "meaning", "output", "extraction_rule"}
+        missing = sorted(required - set(record))
+        if missing:
+            raise ValueError(f"字段定义缺少必填键：{missing}。")
+        return YamlFieldCatalog._to_definition(record, kind)

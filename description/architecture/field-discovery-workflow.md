@@ -1,10 +1,9 @@
 # 字段发现两阶段工作流
 
-> 状态：第一大步已有统一实验流水线
-> [`experiments/field_discovery_stage_one`](../../experiments/field_discovery_stage_one/readme.md)，
-> 覆盖固定字段提取、新字段发现、多路召回融合、Top 5 三分类、确定性身份/分组及组级字段收敛。
-> 第二阶段批次回扫统计、
-> 正式 `FieldDiscoveryService` 与 `discovery` 应用用例仍未实现；正式入口在未注入服务时会明确失败。
+> 状态：两阶段已迁入正式应用。第一阶段覆盖固定字段提取、候选级准入、三视角向量召回、
+> Top 5 逐对三分类、稳定身份、关系图分组、并发组级收敛和全局语义门禁；第二阶段只接收
+> 收敛后的冻结字段，按“单合同、单字段”并发回扫并确定性统计频率。历史实验入口反向复用
+> `src/contract_processor/infrastructure/field_discovery/`，不再维护另一份算法实现。
 
 ---
 
@@ -166,6 +165,11 @@ Attribute 使用批次启动时冻结的 `discovery_attribute_fields` 目录，�
 - 字段定义结构规则；
 - 新字段必须具有稳定业务含义、跨合同复用价值和原始证据的约束。
 
+候选必须是合同正文明确陈述或约定的业务事实。合同主要书写语言、PDF 页数、文件格式、
+扫描/OCR 质量、字体版式或签章颜色等从文档载体本身推知的属性不属于 Attribute discovery；
+它们应由确定性预处理或 Core 元数据管理。合同正文明确约定的适用语言或效力语言仍是业务事实，
+不受该排除规则影响。
+
 每份合同最多提出 5 个新字段，但允许返回少于 5 个或 0 个。该数量是候选预算，不是必须
 凑满的目标。规划配置如下：
 
@@ -196,7 +200,9 @@ items/values，array 必须携带 items，object 必须携带 properties，enum 
 版式位置、当前合同主体、具体值或原句。规则应使用“与当前字段所描述的合同事项直接关联”这类
 中性表达，并根据字段自身含义具体化；不得复制“开票义务”等其他业务领域示例，也不能使用
 “从条款7其他约定中提取”等位置锚点。正则必须写入 `output.pattern`，不能伪装成
-`format: "pattern: ..."`。
+`format: "pattern: ..."`；只有表达真实字符格式限制时才能提供 pattern，`.*`、`^.*$`、`.+`、
+`^.+$` 等无约束正则会被程序拒绝。string pattern 也不能用多个自然语言业务短语分支伪装枚举；
+封闭集合必须使用 enum，开放文本必须省略 pattern。
 
 #### 步骤二内部门禁
 
@@ -208,18 +214,66 @@ items/values，array 必须携带 items，object 必须携带 properties，enum 
 4. 证据位置和来源合同身份校验；
 5. 与固定 Core/Attribute 的 `field_id`、规范化名称和别名精确冲突校验；
 6. `extraction_rule` 不得包含当前合同位置证据；命中时仅允许模型局部修订规则一次；
-7. 对同一合同已通过结构门禁的每个候选并发执行独立的纯文本语义准入，状态仅允许
-   `accepted`、`covered_by_fixed`、`non_atomic`、`invalid_rule`；
-8. 语义门禁按完整业务含义检查固定字段及其 object 子字段覆盖，拒绝把多个可独立缺失、检索或
-   治理的事项打包为宽泛 object，并检查规则是否混入其他业务领域；
-9. `invalid_rule` 只允许锁定字段身份、output 结构和证据后局部修订一次，随后必须重新通过位置
+7. 已通过 JSON Schema、但未通过递归 output、领域定义或固定字段精确冲突等程序契约的候选，
+   也只对该候选局部重试一次。重试锁定 `field_id`、`name`、`meaning`、`evidence`、
+   `novelty_reason` 和 `status`，仅允许修正 `output` 与 `extraction_rule`；修复后必须重新执行
+   全部程序门禁，因此不能借重试绕过固定字段覆盖或证据约束；
+   定义自身也不得冲突，例如付款安排不能把 output 中作为合法阶段的预付款又在规则中整体
+   排除；此类确定矛盾同样只重试当前候选一次；
+   enum 的 extraction_rule 明示的每个字面类别也必须能由 `output.values` 表示，否则模型会在
+   回扫时被迫把未知类别映射成错误枚举值；程序要求补全集合或改用开放 string；
+8. 对同一合同已通过结构门禁的每个候选并发执行独立的纯文本语义准入，状态仅允许
+   `accepted`、`covered_by_fixed`、`non_atomic`、`not_attribute`、`invalid_rule`；
+9. 语义门禁按完整业务含义检查固定字段及其 object 子字段覆盖，拒绝把多个可独立缺失、检索或
+   治理的事项打包为宽泛 object，并检查规则是否混入其他业务领域。`non_atomic` 必须明确指出
+   至少两个实际包含在当前候选定义内的独立业务问题，不能拿候选外的相邻字段证明其不原子；
+   同一事实的多值、重复项、数组表示或不可分割的结构化组成不构成 `non_atomic`。字段来自合同
+   条款、同时保留 Clause 原文或依赖其他合同数值理解，也不单独构成拒绝理由。`not_attribute`
+   专门拒绝非合同明示业务事实的文档载体属性。普通合同序言中的“经协商达成如下协议、共同
+   遵守/恪守”不能作为正式签署前另有初步协议的证据；同时包含付款触发事件、付款期限和逾期
+   后果的宽泛“付款条件”会合并多个可独立缺失的问题，必须拒绝；
+10. `invalid_rule` 只允许锁定字段身份、output 结构和证据后局部修订一次，随后必须重新通过位置
    与语义门禁，不能借重试改变候选。
 
 固定 Core/Attribute 通过 Prompt 和上述覆盖门禁约束新字段，不进入候选向量索引。每个候选的
 语义准入单独调用、由请求限流器控制并发；某项在一次纠错后仍失败时，只拒绝该候选，不影响
 同合同其他候选。结构不合法或已经被固定字段覆盖的提议在此处终止，并记录拒绝原因。
+当 `covered_by_fixed` 遗漏目标 ID、但理由中唯一明确写出一个固定字段 ID、名称或别名时，程序
+只恢复该唯一引用并记录恢复结果；理由没有唯一命中时仍按非法响应纠错，不作猜测。
 
 > **准入结论：** 未通过结构、证据或语义门禁的提议不得进入向量召回；局部重试只能修复规则，不能借机改写候选身份、结构或证据。
+
+#### 正式第一阶段实现
+
+正式实现位于 `src/contract_processor/infrastructure/field_discovery/service.py`，由
+`StructuredFieldDiscoveryService` 提供。它读取原始 PDF 页面、冻结的 Discovery Core／Attribute
+定义及其提取结果，以强 JSON Schema 生成最多五个候选；随后对每个候选分别发起纯文本语义准入。
+这些门禁请求可并发调度，但统一经过 `ModelRequestLimiter`，实际并发上限始终等于
+`models.mllm.max_concurrent_requests`。任意一个候选失败只会拒绝该候选，不会丢弃同批已经通过的
+候选。第一阶段提议不生成 `aliases`、`not_meaning` 或 `examples`；语义门禁检查固定字段覆盖、
+原子性和规则一致性，治理字段只在组级收敛后按来源候选和兄弟字段边界确定性生成。
+
+候选生成、单候选语义准入、候选修复、规则修订、逐对关系判断、组级规划、最终字段定义和
+全局门禁的稳定任务规则统一维护在 `infrastructure/extraction/discovery/prompts/`；运行时只注入
+目录、候选、字段组、校验反馈和预算等动态上下文。该目录全部正式任务文件均纳入
+`prompt_version`，其中第二阶段字段提取规则为 `02_extract_candidate_field.txt`。
+
+即使模型网关返回的候选数组整体未能通过本地 Pydantic 校验，服务也会逐项解析：已合法的候选
+立即保留，只有非法项会单独重试一次；再次失败的项才被拒绝。候选虽然通过 Pydantic、但在后续
+程序契约中出现 `format: "pattern: ..."` 伪装正则、递归 output 不完整等错误时，同样只重试该
+候选一次，并逐项锁定其业务身份与证据，只允许修复 `output` 和 `extraction_rule`。该恢复逻辑
+不会重跑或覆盖同批合法候选，也不能把失败候选改造成另一个业务字段。
+
+`DiscoverFieldsFromBatch` 是批次父图。它按合同顺序调用共享的
+`StructuredFieldDiscoveryService`，因此所有合同复用同一内存向量池；全部合同完成后只调用一次
+`consolidate()`，生成候选池报告、关系图、组级报告、全局门禁和 `frozen_candidates`。
+`frozen_candidates` 此时已是收敛并通过全局门禁的最终字段草案，第二阶段不会接收原始候选。
+同字节 PDF 副本按 `document_id` 去重，避免重复参与身份和频率统计。
+
+单合同构建器拥有独立 discovery 服务和 Embedding 客户端，执行结束时连同页面/MLLM 资源一起
+关闭；批次构建器不在每份合同后关闭共享服务，而是在组级收敛完成后统一关闭，确保候选池完整。
+
+正式 CLI 可用 `--max-documents N` 做受控回归，只截取排序后的前 N 份 PDF，绝不修改输入目录。
 
 ### 5.3 步骤三：多路召回并融合 Top 5
 
@@ -260,7 +314,7 @@ items/values，array 必须携带 items，object 必须携带 properties，enum 
 合同字段值或来源证据；候选是否有原始合同依据已由前置证据门禁负责，字段归属只需要比较定义
 边界。只与 object 某一个子字段相同不能判 `same`；输出类型不同只能触发继续比较，不能单独
 支持 `unrelated`。两个候选具有相同 field_id 和规范名称时，程序也拒绝仅因原文版/结构化版差异
-判成 `related_distinct`。调用必须按 Top 顺序全部完成，不能在出现第一个 `same` 后提前停止；程序收齐比较结果后
+判成 `related_distinct`。字段对请求独立并发，结果仍按 Top 顺序归档；全部比较必须完成，不能在出现第一个 `same` 后提前停止。程序收齐比较结果后
 才执行身份或分组决策。`reason` 在解释边界后必须固定以
 `因此 relation=<relation 字段值>` 收尾；程序会规范化遗漏的结尾，并拒绝已显式写出但与结构化
 `relation` 相反的结论。Schema 解析失败或顶层/子字段危险错配会把清晰失败原因反馈给同一字段对
@@ -308,7 +362,9 @@ LLM 不直接创建身份、选择分组或修改候选池。
 Schema，不调用模型。多候选分量拆成两次职责单一的调用：
 
 1. **候选唯一去向规划**：模型只输出 `field_plan_01...`，为每个 plan 给出来源 candidate、
-   字段名称/含义/边界，或明确淘汰；每个 candidate 必须且只能出现一次，不生成复杂 output；
+   字段名称/含义/边界，或明确淘汰；每个 candidate 必须且只能出现一次，不生成复杂 output。
+   如果窄候选只是结构化字段子字段加筛选条件得到的查询切片（如“预付款比例”来自“付款阶段
+   [].付款比例”），程序要求淘汰该切片，不得建立兄弟字段或并入 aliases；
 2. **单字段定义生成**：程序锁定一个 plan 的来源后，分别让模型生成一个字段的
    `field_id/name/meaning/output.type/extraction_rule`，再按 type 编译正式 output 与动态提取
    JSON Schema；模型不生成 aliases、not_meaning 或 examples。
@@ -317,6 +373,17 @@ Schema，不调用模型。多候选分量拆成两次职责单一的调用：
 会补入彼此 `not_meaning`，确保边界非空。`examples` 仍为空，必须等待第二阶段真实提取和专家
 治理，不能编造。Schema 解析、候选覆盖、规则泛化或字段契约错误都进入同一个最多一次的反馈
 重试，并保留脱敏指标。
+
+兄弟字段及身份计划中的 boundary 是最终定义的硬边界，不能一边把兄弟字段写入 `not_meaning`，
+一边又在 meaning 或 extraction_rule 中把它作为当前字段的模式、正例或兜底值。当前程序还对可
+确定的付款语义矛盾执行本地校验：若“付款方式”已经排除“分期付款安排”，就不能再把“分期支付”
+列为可采纳方式；“付款安排”也不能整体排除预付款或首付款。
+
+单字段定义会递归校验 output、规则泛化性和 `format`/`pattern` 一致性，无约束 pattern 与非法
+正则不能进入最终字段。若模型在反馈重试后
+仍只留下语法非法的可选 `pattern`，程序可移除该不可执行约束并重新执行完整字段契约，同时在
+组级审计中记录恢复路径；字段身份、类型和其他约束不能借此改变。一个分组中的最终字段分别
+并发定义，某个 plan 最终失败时保留同组其他已合法字段并把该组标记为部分成功，而不是整组清空。
 
 所有组完成后再执行全局语义门禁。程序逐个绑定当前最终字段，模型每次只输出一个判断，同时检查：是否被固定 Core/Attribute（含对象
 子字段）覆盖、是否与其他组字段重复、是否存在不能安全自动合并的边界重叠。冲突只标记
@@ -328,9 +395,14 @@ Schema，不调用模型。多候选分量拆成两次职责单一的调用：
 
 > **冲突处理：** 全局门禁只标记 `covered_by_fixed`、`duplicate_final` 或 `overlap_review` 并阻止批次推广；程序不得静默删除或自动合并冲突字段。
 
-正常流程只需运行一次 `field_discovery_stage_one/run.py`，候选池与最终字段草案写入同一运行
-目录。独立[组内收敛入口](../experiments/field-discovery-group-consolidation.md)仅保留给
-历史候选池复现和 Prompt 调试，不再是必经的第二条命令。
+正式流程通过 `run_batch --mode discovery` 一次执行两个阶段，并以标准输出返回候选池、关系图、
+最终字段草案、逐合同观察和频率统计。实验 `field_discovery_stage_one/run.py` 及独立
+[组内收敛入口](../experiments/field-discovery-group-consolidation.md)仅用于历史产物复现和 Prompt
+调试，不再维护独立算法或作为正式流程的必经命令。
+
+批次结果顶层生成唯一 `batch_id`、`started_at`、`completed_at` 和 `processing`。后者冻结 MLLM
+模型、全部正式 Prompt 内容哈希、Embedding 模型/维度/字段摘要指令哈希、Discovery Core／
+Attribute Schema 版本与目录模式，以及候选预算和 Top-K；统计因而不会成为脱离运行版本的裸数字。
 
 #### 增量候选池
 
@@ -354,33 +426,97 @@ Schema，不调用模型。多候选分量拆成两次职责单一的调用：
 Schema 临时验证字段是否存在；字段值可以为完成结构和语义校验在内存中短暂产生，但不得写入
 正式合同元数据或 Elasticsearch。
 
-> **统计边界：** 字段定义与批次统计分离。技术错误必须单独计数，不能伪装成 `not_found`；同一合同的重复表述也不能抬高不同合同命中数。
+> **统计边界：** 正式字段目录与批次统计分离；待审核 YAML 可将统计挂在候选定义下。技术错误必须单独计数，不能伪装成 `not_found`；同一合同的重复表述也不能抬高不同合同命中数。
+
+### 6.1 正式子图与并发粒度
+
+正式第二阶段子图只包含两个业务节点：
+
+```text
+START
+  → extract_candidate_field（LangGraph Send 动态并发）
+  → calculate_candidate_statistics（确定性 Python 聚合）
+  → END
+```
+
+父图把冻结候选与不同 `document_id` 的合同集合做笛卡尔积；每个 `Send` 只携带一份合同和
+一个候选字段。每次 MLLM 请求只包含当前 PDF、一个冻结字段定义和对应的单字段强 JSON Schema，
+禁止把多个候选合并为一次数组生成。单项结构或业务校验失败后只重试当前字段一次，再失败则生成
+`task_status=failed` 的观察，不影响其他字段—合同任务。
+
+`CandidateFieldExtractionService` 在批次内缓存每份合同的全页渲染结果，避免同合同的不同字段重复
+执行 PyMuPDF 渲染；模型请求仍各自发送完整页面。所有动态任务共享同一个
+`ModelRequestLimiter`，LangGraph 中的待执行任务数可以大于模型实际并发数，实际并发上限由
+`models.mllm.max_concurrent_requests` 决定。
+
+冻结字段中的动态 `pattern` 会保留在字段 Prompt 和正式定义中，但不直接交给 vLLM 的 xgrammar
+生成语法；任意模型生成正则可能使后端在字符串闭合前错误结束。模型先按不含动态 pattern 的
+结构 Schema 生成完整 JSON，程序解析后再用 Draft 2020-12 对 `found` 规范值执行同一递归正则
+约束。失败原因会反馈具体字段路径和约束后只重试当前任务一次，最终契约没有被放松。
+
+回扫还会执行三类可确定的业务校验：`output.unit=percent` 时，程序从最小原文识别 `%`、`‰`、
+`‱` 及“百分之/千分之/万分之”比例，并核对规范值使用百分数口径，例如 `40%=40`、`1‰=0.1`、
+`万分之一=0.01`；交付/交货/运输方式字段必须有快递、物流、送货、自提等具体机制，只有“发货”
+或“交付”动作及其时间条件不能计为 found；付款方式必须有转账、汇款、现金、信用证、款到发货
+等独立支付工具或结算机制，多阶段比例、金额和期限的整段付款计划不能重复计入，且原文不得混入
+合同回传、作废、取消等相邻事实；发票类型必须保持专票/普票类别一致，发票税率原文必须保留
+发票、开票或增值税语境，发票备注必须直接绑定票面需注明内容，不能吸收含税价、运费或物流等
+相邻约定。任一错误只触发当前合同—字段任务局部重试一次。
+
+对象字段的通用外层状态由子字段确定性汇总，但字段自身可以施加更严格的完整性规则。例如
+`penalty_for_late_delivery` 只有责任方、没有违约金比例、计费基数和计罚方式时，只能证明一般
+逾期责任，不能判为违约金 `found`；程序会把“唯一命中责任方、三个计算要素均未命中”的窄场景
+安全降级为整体 `not_found`。其他部分要素缺失或责任方原文与规范值矛盾时仍进入单字段反馈门禁，
+不得用通用降级掩盖不确定结果。
+
+字节完全相同的输入副本具有相同 `document_id`，第二阶段只计为一份不同合同。第一阶段某份合同
+失败时，该文件仍参与第二阶段回扫：候选可能来自批次内其他合同，不能因其自身第一阶段失败而
+制造统计盲区。
+
+### 6.2 观察与频率口径
 
 固定 Core 和固定 Attribute 已在第一阶段对每份合同完整提取，可直接从对应状态累计统计；
 新候选必须执行第二遍全量验证，不能只统计首次提出该字段之后处理的合同。
 
-字段统计与字段定义分离，至少记录：
+字段统计在批次审核 YAML 中挂在对应字段定义的 `statistics` 键下，至少记录：
 
 ```yaml
-field_ref:
-  field_set: candidate
-  field_id: confidentiality_period
-batch_id: discovery-20260803-001
-source_document_count: 100
-evaluated_document_count: 99
-found_document_count: 23
-not_found_document_count: 65
-not_applicable_document_count: 8
-ambiguous_document_count: 2
-conflicting_document_count: 1
-error_document_count: 1
-document_hit_rate: 0.2323
+fields:
+  - field_id: confidentiality_period
+    name: 保密期限
+    meaning: 合同明确约定的保密义务持续期间或终止条件。
+    aliases: []
+    not_meaning: []
+    output: {type: string, nullable: true}
+    extraction_rule: 仅提取与保密义务直接绑定的持续期间或终止条件。
+    examples: []
+    statistics:
+      candidate_ref: group_0001:confidentiality_period
+      document_count: 100
+      scanned_document_count: 99
+      found_document_count: 23
+      not_found_document_count: 65
+      not_applicable_document_count: 8
+      ambiguous_document_count: 2
+      conflicting_document_count: 1
+      failed_document_count: 1
+      frequency: 0.232323
+      conservative_frequency: 0.23
+      found_source_names: [采购合同A.pdf, 设备合同B.pdf]
+      failed_source_names: [服务合同C.pdf]
 ```
 
-命中频率不能作为一个无批次、无分母的可变值直接写入字段定义 YAML。统计记录必须绑定
-批次、字段目录版本、模型版本和 Prompt 版本。技术错误单独计数，不伪装成 `not_found`；
-`document_hit_rate = found_document_count / evaluated_document_count`，其中已验证合同数不包含
-技术错误。同一合同内多次出现只增加观察次数，不重复增加不同合同命中数。
+命中频率不能写入正式 `attribute.yaml`，也不能成为脱离批次和分母的字段固有属性。批次审核
+YAML 顶层必须绑定批次、字段目录版本、模型版本和 Prompt 版本；每项统计嵌入对应候选定义，
+便于人工审核时同时观察“字段是什么”和“在本批合同中出现多少”。技术错误单独计数，不伪装成
+`not_found`；同一合同内多次出现也只增加观察次数，不重复增加不同合同命中数。
+
+正式 DTO 使用 `frequency = found_document_count / scanned_document_count`；另提供
+`conservative_frequency = found_document_count / document_count`。前者用于评价已成功扫描合同中的
+命中表现，后者把技术失败保留在总分母中，便于观察最保守下界。`ambiguous`、`conflicting`、
+`not_applicable` 均属于已成功扫描但非命中状态；`failed` 不得并入 `not_found`。
+运行 DTO 内部使用 `document_id` 保证相同字节合同去重稳定；最终审核 YAML 不展示这些哈希，
+而使用 `found_source_names` 和 `failed_source_names` 列出原始 PDF 文件名，方便人工定位。
 
 ---
 
@@ -396,17 +532,24 @@ Discovery 输出的是字段知识审核包，而不是合同入库包。审核�
 - 模型、Prompt、Embedding 和批次版本；
 - 专家审核状态与决定理由。
 
-不保存每份合同对应字段的正式规范值。专家可以决定把候选纳入新的 Discovery Core、Discovery
-Attribute、Production Core 或 Production Attribute 版本，也可以合并、拒绝或继续观察。
-任何模型判断都不能直接修改目录。
+运行响应保留每个字段—合同任务的内存观察值、原文和状态，供统计审计；这些观察不写入正式合同
+存储或 Elasticsearch，也不等同于生产抽取结果。专家可以决定把候选纳入新的 Discovery Core、
+Discovery Attribute、Production Core 或 Production Attribute 版本，也可以合并、拒绝或继续
+观察。任何模型判断都不能直接修改目录。
 
 > **审核边界：** 只有专家的目录决策能够把候选写入新的 Discovery 或 Production 字段目录；模型输出始终只是审核材料。
+
+正式批次完成后，`YamlFieldDiscoveryResultStore` 将通过全局门禁的冻结字段与第二阶段统计一一
+关联，并原子写入 `data/definitions/discovery/result/<batch_id>.yaml`。文件采用 `status: draft`；
+每个 `fields[]` 项保持 Attribute 字段定义结构，只增加 `statistics`，其中也保存
+`candidate_ref`、`group_id` 和来源候选 ID。不同批次使用独立文件，不覆盖历史批次；写盘或关联
+校验失败会使当前 discovery 调用失败，不能静默返回缺少审核产物的成功结果。
 
 ---
 
 ## 8. 对外接口与实现分层
 
-规划中的批次用例职责为：
+正式批次用例职责为：
 
 ```text
 DiscoverFieldsFromBatch
@@ -419,12 +562,13 @@ DiscoverFieldsFromBatch
   → 回扫合同集并输出统计审核包
 ```
 
-- `application` 保存候选池、关系判定、身份选择、分组和统计规则；
-- `infrastructure/rag` 只封装 LlamaIndex 内存向量检索；
-- `infrastructure/llm` 只负责结构化模型调用；
+- `application` 保存批次用例、LangGraph 状态、结果 DTO 和确定性统计；
+- `infrastructure/field_discovery` 保存候选向量池、模型结构契约、身份/分组规则和两阶段抽取服务；
+- `infrastructure/persistence` 原子保存按批次命名的待审核字段定义与统计 YAML；
+- `infrastructure/llm` 提供共享请求限流等通用模型能力；
 - LangGraph 负责节点依赖和状态传递，不决定字段身份；
-- `experiments/` 负责首轮真实合同验证和实验产物落盘；
-- 正式服务默认无本地业务落盘副作用。
+- `experiments/` 只保留历史复现入口，并反向复用正式算法；
+- 正式批次只落盘待审核 discovery YAML，不写正式字段目录、合同结果或 Elasticsearch。
 
 > **分层边界：** 检索端口只负责召回，LLM 端口只负责结构化调用，LangGraph 只负责依赖和状态；字段身份与治理规则属于 `application`。
 
@@ -438,5 +582,5 @@ DiscoverFieldsFromBatch
 - 固定字段约束与候选向量池必须使用不同对象和端口语义，防止固定目录被错误分组；
 - 第一阶段模型调用失败不能创建候选身份；第二阶段失败不能计为字段未命中；
 - 批次合同集合、目录快照和模型版本必须冻结，确保统计可复现；
-- 当前通用 `LlamaIndexFieldSimilaritySearcher` 能索引调用方传入的定义；接入字段发现算法时，
-  调用方必须只传本批次新候选，不能传固定 Core/Attribute。
+- 正式 `CandidateVectorPool` 只接收本批次已准入的新候选；固定 Core/Attribute 仅作为覆盖约束，
+  不能传入向量池。

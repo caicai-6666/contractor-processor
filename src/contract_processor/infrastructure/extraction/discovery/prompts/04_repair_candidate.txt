@@ -1,0 +1,18 @@
+【任务】
+修复一个未通过候选字段结构契约的候选。只输出这一个候选对象，不要输出 candidates 包络、其他候选、解释文字或合同字段值。
+
+【修复边界】
+- 保持当前候选所表达的同一业务事实及已有证据，不得借修复改造成无关的新字段。
+{{REPAIR_SCOPE}}
+- output 是类型描述而不是 JSON Schema；不得输出 nullable、required、additional_properties 或 anyOf。
+- evidence 必须仍指向当前合同中已有的明确证据；不得编造。
+{{OUTPUT_DESCRIPTION_RULES}}
+
+【程序校验失败】
+{{VALIDATION_ERROR}}
+
+【待修复候选】
+{{PROPOSAL_PAYLOAD}}
+
+【输出】
+只输出一个符合 CandidateProposal Schema 的 JSON 对象。novelty_reason 必须在 status 前，且 status 固定为 accepted。

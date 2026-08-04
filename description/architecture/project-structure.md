@@ -125,7 +125,7 @@ Core、Clause 和 Contract Summary 读取同一 PDF 时，必须遵循 [MLLM Pro
 | `PdfRenderer` | 将 PDF 转换为可供视觉模型理解的页面与证据坐标 | 本地 PDF 渲染器 |
 | `VisionModelClient` | 调用 Qwen2.5-VL 并返回结构化结果 | OpenAI SDK 封装的本地 vLLM 客户端 |
 | `FieldCatalog` | 读取、校验并写入 Core/Attribute 字段定义 | `data/definitions` 下的 YAML |
-| `FieldDiscoveryService` | 消费原始页面、固定 Core/Attribute 结果与定义并返回新候选 | 端口已建立，协议尚需扩展后接入 |
+| `FieldDiscoveryService` | 消费原始页面、固定 Core/Attribute 结果与定义并返回新候选 | `StructuredFieldDiscoveryService`，共享批次候选池与组级收敛器 |
 | `FieldSimilaritySearcher` | 只在本批次新字段身份之间执行 Top 5 向量召回 | LlamaIndex `SimpleVectorStore` 批次内存索引 |
 | `SourceDocumentStore` | 按 `document_id` 保存并读取专家已确认合同的原始 PDF | 本地文件系统；后续可替换对象存储 |
 | `ContractIndexRepository` | 保存专家确认后的元数据、检索向量和合同视觉判重向量 | Elasticsearch |
@@ -139,16 +139,17 @@ Core、Clause 和 Contract Summary 读取同一 PDF 时，必须遵循 [MLLM Pro
 
 ## 6. 当前正式用例与入口
 
-当前已经实现 `ProcessContract`；`DiscoverContractFields` 的应用与拓扑边界也已建立，但正式默认发现服务尚未迁移。其余批次、确认和审核用例沿用下列边界逐步接入：
+当前已经实现生产单合同处理、单合同字段发现和两阶段批次字段发现。确认、审核与目录晋级用例
+沿用下列边界逐步接入：
 
 | 用例 | 状态 | 输入 | 输出 |
 | --- | --- | --- |
 | `ProcessBatch` | 规划 | 合同目录、字段库版本、运行配置 | 批次编号、逐份合同自动化候选、运行指标 |
 | `ProcessContract` | 已实现 | 单份 PDF、固定字段目录版本 | Core、固定 Attribute、Clause 和 Abstract 自动化最终候选 |
-| `DiscoverContractFields` | 部分实现 | 单份 PDF、Core/Attribute 目录版本 | 独立发现结果；禁用 Clause/Abstract；具体发现服务待注入 |
-| `DiscoverFieldsFromBatch` | 规划 | 固定合同集、独立 Discovery 目录及模型版本 | 新候选身份、语义分组、全量回扫统计与审核包 |
+| `DiscoverContractFields` | 已实现 | 单份 PDF、Core/Attribute 目录版本 | 独立发现结果；禁用 Clause/Abstract；候选进入调用方持有的批次池 |
+| `DiscoverFieldsFromBatch` | 已实现 | 固定合同集、独立 Discovery 目录及模型版本 | 新候选身份、语义分组、冻结字段、逐合同回扫观察与频率统计 |
 | `IngestReviewedContract` | 已实现 | 专家直接修正并确认的最终对象、原始 PDF | PDF 落盘结果和 Elasticsearch 写入结果 |
-| `ConsolidateAttributes` | 规划 | 本轮候选 Attribute | 归并结果、频次统计、字段库变更建议 |
+| 候选组级收敛 | 已实现（批次内部） | 本轮候选 Attribute 与关系图 | 唯一去向、最终字段定义、全局语义门禁；不自动修改字段库 |
 | `ExportAttributeReview` | 规划 | 批次编号 | 按不同合同数降序的 Markdown/CSV 审核文件 |
 | `PromoteAttributeToCore` | 规划 | 经专家确认的字段 ID | Core 字段库更新与迁移审计记录 |
 
@@ -225,14 +226,15 @@ interfaces/api/
 - 不让 LangGraph、LlamaIndex 或 OpenAI SDK 的对象穿透到 `domain` 或 `application` 的公共接口中。
 - Core、Attribute、Clause 和摘要机器规范维护在 `data/definitions/`；运行时由配置路径读取，
   禁止散落硬编码在 Python 模块中。`description/` 只保存解释性文档。
-- `DiscoverContractFields` 的端口、DTO 与拓扑已实现，正式默认字段发现算法尚未迁移；CLI 已
-  支持模式切换，选择 discovery 时会 fail closed。第一大步批处理实验已经用一条流水线覆盖固定
-  Core/Attribute、新字段发现与规则门禁、LlamaIndex 批次内 Top 5、多路排名融合、LLM 三分类、
-  确定性分组和组级字段收敛；`DiscoverFieldsFromBatch`、第二阶段统计、候选治理和 Attribute
-  Profile 的选择与版本治理仍是后续开发边界。
+- `DiscoverContractFields` 的端口、DTO、正式默认服务与拓扑均已实现；
+  `DiscoverFieldsFromBatch` 依次完成固定 Core/Attribute、新字段发现与规则门禁、LlamaIndex
+  批次内 Top 5、多路排名融合、LLM 逐对三分类、确定性分组、并发组级收敛、全局门禁，以及
+  冻结字段的全合同集逐字段回扫和频率统计。完成的批次会将待审核字段定义及统计原子写入
+  `data/definitions/discovery/result/<batch_id>.yaml`。候选专家治理、目录晋级和 Attribute Profile
+  的选择与版本治理仍是后续开发边界。
 
 字段发现目标算法使用独立 Discovery Core/Attribute 作为固定约束，只把本批次新字段身份
 加入候选向量池；第一大步五节点统一流水线和第二阶段全量统计协议见
 [字段发现两阶段工作流](field-discovery-workflow.md)。
 
-> **当前限制：** 未实现的字段发现、业务判重、版本替换和 HTTP 服务必须显式失败或保持未注册状态；不得通过放宽字段契约或越过用例层来伪造支持。
+> **当前限制：** discovery 只生成 `status: draft` 的待审核知识包，不自动执行候选晋级、业务判重、版本替换或 HTTP 发布；这些未实现能力必须保持未注册状态。

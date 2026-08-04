@@ -9,7 +9,7 @@ from contract_processor.application.workflows.state import FieldDiscoveryState
 
 
 class FieldDiscoveryPipelines(Protocol):
-    """发现模式只需要准备、Core 上下文和候选发现三项能力。"""
+    """发现模式在开放发现前先获得固定 Core 与 Attribute 上下文。"""
 
     @property
     def model_name(self) -> str:
@@ -23,14 +23,28 @@ class FieldDiscoveryPipelines(Protocol):
     def core_catalog_mode(self) -> str:
         """返回 empty_catalog 或 active_catalog。"""
 
+    @property
+    def attribute_catalog_mode(self) -> str:
+        """返回固定 Attribute 目录的 empty_catalog 或 active_catalog。"""
+
+    @property
+    def field_discovery_metrics(self) -> dict[str, Any]:
+        """返回当前合同候选生成、门禁与身份归并的审计指标。"""
+
     async def prepare(self, pdf_path: Path) -> dict[str, Any]:
         """计算文档身份、渲染页面并建立共享模型会话。"""
 
     async def extract_core(self, pdf_path: Path) -> dict[str, Any]:
         """零 Core 时确定性返回空结果，否则执行现有 Core 算法。"""
 
+    async def extract_attributes(self, core: dict[str, Any]) -> list[dict[str, Any]]:
+        """抽取固定 Attribute，供候选字段门禁排除既有语义覆盖。"""
+
     async def discover_fields(
-        self, pdf_path: Path, core: dict[str, Any]
+        self,
+        pdf_path: Path,
+        core: dict[str, Any],
+        attributes: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
         """调用注入的字段发现端口。"""
 
@@ -59,11 +73,20 @@ class FieldDiscoveryNodes:
         result = await self._pipelines.extract_core(Path(state["contract_path"]))
         return {"core_result": result["fields"]}
 
+    async def extract_attributes(self, state: FieldDiscoveryState) -> dict[str, Any]:
+        attributes = await self._pipelines.extract_attributes(state["core_result"])
+        return {"attribute_result": attributes}
+
     async def discover_fields(self, state: FieldDiscoveryState) -> dict[str, Any]:
         candidates = await self._pipelines.discover_fields(
-            Path(state["contract_path"]), state["core_result"]
+            Path(state["contract_path"]),
+            state["core_result"],
+            state["attribute_result"],
         )
-        return {"field_candidates": candidates}
+        return {
+            "field_candidates": candidates,
+            "discovery_metrics": self._pipelines.field_discovery_metrics,
+        }
 
     async def finalize(self, state: FieldDiscoveryState) -> dict[str, Any]:
         versions = await self._pipelines.field_schema_versions()
@@ -75,5 +98,6 @@ class FieldDiscoveryNodes:
                 "core_schema_version": versions["core_schema_version"],
                 "attribute_schema_version": versions["attribute_schema_version"],
                 "core_catalog_mode": self._pipelines.core_catalog_mode,
+                "attribute_catalog_mode": self._pipelines.attribute_catalog_mode,
             }
         }

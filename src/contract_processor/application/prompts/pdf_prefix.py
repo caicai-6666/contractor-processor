@@ -21,6 +21,23 @@ REQUIRED_EXTRACTION_PROMPTS = (
     "abstract/prompts/01_extract_summary_sections.txt",
     "abstract/prompts/02_retry_summary_section.txt",
     "attribute/prompts/01_extract_attribute_field.txt",
+    "discovery/prompts/00a_relation_system.txt",
+    "discovery/prompts/00b_rule_revision_system.txt",
+    "discovery/prompts/00c_semantic_gate_system.txt",
+    "discovery/prompts/00d_group_refinement_system.txt",
+    "discovery/prompts/00e_global_gate_system.txt",
+    "discovery/prompts/01_propose_fields.txt",
+    "discovery/prompts/01b_propose_fields_context.txt",
+    "discovery/prompts/02_extract_candidate_field.txt",
+    "discovery/prompts/03_admit_candidate.txt",
+    "discovery/prompts/04_repair_candidate.txt",
+    "discovery/prompts/05_revise_extraction_rule.txt",
+    "discovery/prompts/06a_compare_relation_preamble.txt",
+    "discovery/prompts/06b_compare_relation_target.txt",
+    "discovery/prompts/07_group_ownership.txt",
+    "discovery/prompts/08_final_field_definition.txt",
+    "discovery/prompts/09_global_semantic_gate.txt",
+    "discovery/prompts/10_global_conflict_confirmation.txt",
 )
 
 

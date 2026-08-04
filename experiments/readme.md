@@ -18,6 +18,14 @@ Core、Clause、Contract Summary 和终审入库均已迁入 `src/contract_proce
 - [`field_discovery_stage_one`](field_discovery_stage_one/readme.md)：字段发现第一大步统一流水线
 - [`field_discovery_group_consolidation`](field_discovery_group_consolidation/readme.md)：历史候选池
   的组级收敛复现入口；正常流程无需单独运行
+- [`field_discovery_extraction_batch`](field_discovery_extraction_batch/readme.md)：使用冻结候选定义
+  批量复测逐字段提取、逐文件耗时与 vLLM 前缀缓存命中率
+- [`full_extraction_batch`](full_extraction_batch/readme.md)：批量运行正式 Core、Attribute、Clause、
+  Abstract 完整并行图，输出逐文件 YAML、节点耗时和平均缓存命中率
+- [`field_discovery_batch_report`](field_discovery_batch_report/readme.md)：正式两阶段字段发现的精简
+  汇报入口，只保留字段定义、命中率、批次耗时和批次平均缓存命中率
+- [`contract_vector_retrieval`](contract_vector_retrieval/readme.md)：完整提取后在内存中测试摘要、
+  PDF 视觉、合同名称与产品名称四类向量召回，不连接 Elasticsearch
 
 三个模型算法共享完全一致的 system、PDF 公共规则、页面图像和页面可见范围，但不合并
 业务输出。正式边界见[正式抽取服务](../description/capabilities/extraction-services.md)，前缀分层

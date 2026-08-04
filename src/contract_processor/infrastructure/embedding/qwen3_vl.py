@@ -169,6 +169,12 @@ class Qwen3VLEmbeddingClient:
         return self._policy.instruction_version
 
     @property
+    def field_summary_instruction_version(self) -> str:
+        """标识字段发现专用文本指令，避免与合同入库向量策略版本混淆。"""
+
+        return hashlib.sha256(FIELD_SUMMARY_INSTRUCTION.encode("utf-8")).hexdigest()
+
+    @property
     def visual_strategy(self) -> str:
         return self._policy.visual_strategy
 

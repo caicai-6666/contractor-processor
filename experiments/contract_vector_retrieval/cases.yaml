@@ -1,0 +1,84 @@
+schema_version: "1.0"
+
+# 查询在运行前固定。每条查询只指定一个相关合同，避免跑分后再调整答案。
+contracts:
+  ET-3030加热台合同2025-04-03_已签章.pdf:
+    abstract_hyde:
+      query: 查找购买小型加热设备、付款后很快发货且金额较低的采购合同
+      hypothetical_document: 一份设备买卖合同，采购方购买一台 ET-3030 加热台，价款约两千元，采用款到发货方式，付款后两个工作日内通过快递交付，并约定设备质保。
+    contract_name_queries:
+      - id: name_et_partial
+        kind: partial_keyword
+        text: 买卖
+    product_name_queries:
+      - id: product_et_common_name
+        kind: common_name
+        text: 电热板
+      - id: product_et_model_abbreviation
+        kind: model_abbreviation
+        text: ET3030
+
+  北京精雕-Holder合同(1)_已签.pdf:
+    abstract_hyde:
+      query: 查找委托北京加工方制造 R5 夹具零件并分阶段付款的合同
+      hypothetical_document: 一份制造服务合同，委托专业加工中心制造 Holder With R5 夹具零件，总价约三千元，先支付百分之四十预付款，发货前再支付剩余款项。
+    contract_name_queries:
+      - id: name_holder_partial
+        kind: partial_keyword
+        text: 制造服务
+    product_name_queries:
+      - id: product_holder_common_name
+        kind: common_name
+        text: R5夹具
+      - id: product_holder_partial
+        kind: partial_product
+        text: Holder R5
+
+  大肯科技合同.pdf:
+    abstract_hyde:
+      query: 查找采购定制机械手、金额约十一万元且分期付款的合同
+      hypothetical_document: 一份机械臂定制采购合同，购买用于自动化设备的定制机器人手臂，型号 DK470010000，含税金额约十一万元，按预付款、发货款和质保尾款分期支付。
+    contract_name_queries:
+      - id: name_robot_partial
+        kind: partial_keyword
+        text: 机械臂定制
+    product_name_queries:
+      - id: product_robot_common_name
+        kind: common_name
+        text: 机器人手臂
+      - id: product_robot_model_abbreviation
+        kind: model_abbreviation
+        text: DK470010000机械手
+
+  柏莱-深圳现象光伏科技有限公司0908_已签章.pdf:
+    abstract_hyde:
+      query: 查找采购蒸发仪转接电路板、付款后发货的合同
+      hypothetical_document: 一份电子配件销售合同，采购一件用于 Hei-VAP 设备的 PCB 信号转接板，品牌为海道尔夫，金额约两千五百元，合同约定款到发货。
+    contract_name_queries:
+      - id: name_pcb_partial
+        kind: partial_keyword
+        text: 销售
+    product_name_queries:
+      - id: product_pcb_common_name
+        kind: common_name
+        text: PCB转接板
+      - id: product_pcb_partial
+        kind: partial_product
+        text: 信号板
+
+  深圳现象光伏科技有限公司4.17(3)_已签章.pdf:
+    abstract_hyde:
+      query: 查找采购除静电风枪、全款到账后发货的合同
+      hypothetical_document: 一份工业设备购销合同，采购一台 Tronovo TG2032 脉冲高频离子风枪，用于静电消除，含税价约一千九百元，采用全款到账后发货的付款方式。
+    contract_name_queries:
+      - id: name_ion_partial
+        kind: partial_keyword
+        text: 购销
+    product_name_queries:
+      - id: product_ion_common_name
+        kind: common_name
+        text: 除静电枪
+      - id: product_ion_model_abbreviation
+        kind: model_abbreviation
+        text: TG2032
+

@@ -116,7 +116,10 @@ def _field_envelope_schema(
         "type": "object",
         "properties": {
             "raw_value": {
-                "anyOf": [{"type": "string"}, {"type": "null"}],
+                "anyOf": [
+                    {"type": "string", "minLength": 1},
+                    {"type": "null"},
+                ],
                 "description": "用于追溯的最小必要原始值文本，不包含解释或推理",
             },
             "reason": {
@@ -161,7 +164,10 @@ def _property_envelope_schema(
         "type": "object",
         "properties": {
             "raw_value": {
-                "anyOf": [{"type": "string"}, {"type": "null"}],
+                "anyOf": [
+                    {"type": "string", "minLength": 1},
+                    {"type": "null"},
+                ],
                 "description": (
                     "当前子字段相关的最小必要合同原文；无相关原文时为 null，"
                     "有相关语境但无可采用值时允许保留原文"

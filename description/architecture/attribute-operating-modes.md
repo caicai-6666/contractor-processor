@@ -1,9 +1,8 @@
 # Attribute 双运行模式设计
 
 > 状态：双模式配置、应用用例、LangGraph 拓扑、0 Core 策略、结果协议和固定 Attribute 提取
-> 算法已经实现；Attribute 使用 `0.3/draft` 初始目录逐字段提取。字段发现第一阶段已有独立
-> 实验实现；正式 `FieldDiscoveryService` 尚未迁移，因此 discovery 未注入服务时仍会在昂贵
-> 资源初始化前明确失败。
+> 算法已经实现；Attribute 使用 `0.3/draft` 初始目录逐字段提取。字段发现两阶段已迁入正式
+> `FieldDiscoveryService` 与批次用例，CLI 可在一次运行中完成候选收敛和全合同集回扫统计。
 
 ---
 
@@ -111,7 +110,7 @@ Discovery 使用与生产目录物理隔离的 Core/Attribute 目录作为“已
   → 读取独立 Discovery Core/Attribute 目录（均允许为空）
   → 依次提取固定 Core、固定 Attribute
   → 基于原文、固定约束和提取结果提出最多 5 个新字段
-  → 程序执行结构编译与批量语义准入门禁
+  → 程序执行结构编译与逐候选并发语义准入门禁
   → 仅在本批次新候选池中召回 Top 5
   → LLM 对 Top 5 全量执行 same/related_distinct/unrelated 判别
   → 程序确定候选身份并更新关系图治理分量
@@ -136,17 +135,24 @@ PDF 输入。完整两阶段算法见
 
 > **禁止旁路：** 不得以“先调用、后丢弃”的方式模拟禁用，也不得通过自由组合开关创建未定义的运行模式。
 
-正式 `discovery` 入口当前仍只有以下最小拓扑：
+正式 `discovery` 入口由单合同图和批次父图共同组成：
 
 ```text
-START → prepare_document → extract_core → discover_attributes → END
+单合同图：START → prepare → extract_core → extract_attributes
+                → discover_fields → finalize → END
+
+批次父图：START → stage_one_discovery
+                  → stage_two_statistics → END
+
+第二阶段子图：START → Send(单合同 × 单冻结字段)
+                    → extract_candidate_field
+                    → calculate_candidate_statistics → END
 ```
 
-合同集的聚类、统计和专家审核由批次级用例在单合同图之外完成。
+批次级用例按合同顺序复用一个候选池，候选冻结后再动态并发回扫完整合同集。历史
 独立实验 [`field_discovery_stage_one`](../../experiments/field_discovery_stage_one/readme.md)
-已经验证“固定 Discovery Core → 固定 Discovery Attribute → 候选生成门禁 → 批次内候选池”
-链路，并在候选池冻结后于同一运行中完成关系图分组、两阶段组级收敛与全局语义门禁；它不替代正式入口，且不包含第二阶段
-全合同集回扫统计。
+保留为复现入口并反向复用正式实现，不再维护独立算法；专家晋级和目录版本治理仍在正式
+运行之外完成。
 
 ### 3.4 候选最小信息
 
@@ -313,12 +319,13 @@ LangGraph 只负责拓扑和状态传递，不决定候选能否成为 Core，�
 9. 专家预置的 `0.3/draft` Attribute 初始目录及递归字段定义。
 10. 固定 Attribute 逐字段提取、动态 JSON Schema、字段级失败隔离与最终覆盖门禁。
 11. Core Step 1 合同理解地图和成功 Core 简洁上下文的内存级复用；原始 PDF 仍为事实来源。
+12. 正式字段发现默认服务：单候选并发准入、批次向量池、逐对关系判断和组级收敛。
+13. `DiscoverFieldsFromBatch` 第二阶段：冻结字段 × 去重合同的逐字段并发回扫与确定性频率统计。
 
 ### 尚未实现
 
-1. 第二阶段全合同集回扫、频次统计和专家审核用例；
-2. discovery 的默认基础设施实现，因此当前 CLI 选择 discovery 会 fail closed；
-3. Attribute Profile 的选择和版本治理。
+1. 候选字段的专家审核交互与目录晋级用例；
+2. Attribute Profile 的选择和版本治理。
 
 在上述能力完成前，不得通过移除空目录校验或让模型自由返回任意键的方式“临时支持”
 Attribute；这会绕过字段治理边界，并使生产结果无法建立稳定索引。

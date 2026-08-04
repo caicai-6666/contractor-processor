@@ -1,0 +1,24 @@
+【任务】
+为程序已经确定来源的一个最终字段生成正式字段描述。不得重新分配、增加或删除候选。
+
+【字段身份计划】
+{{FIELD_PLAN}}
+
+【绑定来源候选】
+{{SOURCE_CANDIDATES}}
+
+【同组其他最终字段】
+{{SIBLING_FIELDS}}
+
+【定义规则】
+- field_id 使用稳定 lower_snake_case；name/meaning 必须与身份计划一致。
+- 本步骤不生成 aliases、not_meaning 或 examples：程序从来源候选名称/既有边界和兄弟字段确定性补齐，避免编造。
+- examples 本阶段不生成。output 只描述 type 及该类型不可缺少的参数，不得手写 JSON Schema。
+{{OUTPUT_DESCRIPTION_RULES}}
+- extraction_rule 只描述跨合同适用的确认条件、排除边界、规范化及缺失/冲突处理。禁止页码、条款号、章节标题、版式位置、当前合同实体、具体值或原句；规则中的业务对象必须与本字段 name/meaning 一致。
+- 同组其他最终字段及字段计划 boundary 是硬边界：不得把兄弟字段作为当前字段的类型、模式、正例或兜底值，也不得用“优先提取”等措辞继续接纳兄弟字段。meaning、output 与 extraction_rule 必须自洽，不能先把某事实作为组成部分或正例，再在规则中整体排除。
+- 若同组同时存在“分期付款安排”和“付款方式”，前者治理付款阶段、比例、金额和期限；后者只有在合同给出独立支付工具或结算机制时成立，不得把分期支付或整段付款计划再次收进付款方式。
+- 正则约束必须写入 output.pattern，禁止写成 format='pattern: ...'。
+
+【输出】
+只输出当前一个字段的 JSON，不得输出 source_candidate_ids、plan_id、aliases、not_meaning 或 examples。

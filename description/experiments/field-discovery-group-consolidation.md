@@ -1,6 +1,6 @@
 # 字段发现统一流水线的组级收敛模块
 
-> **状态：** 已接入字段发现第一大步统一实验流水线；独立入口仅用于历史产物复现。仍不属于正式 `FieldDiscoveryService`，不修改来源候选池或字段目录。
+> **状态：** 算法已迁入正式 `FieldDiscoveryService`；本实验入口仅用于历史产物复现，代码反向复用 `src/contract_processor/infrastructure/field_discovery/`，且不修改字段目录。
 
 ---
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -32,12 +33,28 @@ class DiscoverContractFields:
         project_root: Path,
         pipelines: FieldDiscoveryPipelines,
         graph_factory: DiscoveryGraphFactory,
+        close_discovery_service: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
         self._project_root = project_root
         self._pipelines = pipelines
         self._graph_factory = graph_factory
+        self._close_discovery_service = close_discovery_service
 
     async def execute(self, pdf_path: Path) -> FieldDiscoveryResult:
+        """执行单合同发现，并在任意入口失败时释放所拥有的全部资源。"""
+
+        try:
+            return await self._execute(pdf_path)
+        finally:
+            # 单合同构建器拥有 discovery 服务时，必须连同其 Embedding 客户端一起关闭；
+            # 批次构建器则把共享服务保留到整批收敛完成后再统一关闭。
+            try:
+                await self._pipelines.close()
+            finally:
+                if self._close_discovery_service is not None:
+                    await self._close_discovery_service()
+
+    async def _execute(self, pdf_path: Path) -> FieldDiscoveryResult:
         candidate_pdf = (
             pdf_path if pdf_path.is_absolute() else self._project_root / pdf_path
         )
@@ -49,15 +66,13 @@ class DiscoverContractFields:
         graph = self._graph_factory.build_field_discovery(
             prepare=nodes.prepare,
             extract_core=nodes.extract_core,
+            extract_attributes=nodes.extract_attributes,
             discover_fields=nodes.discover_fields,
             finalize=nodes.finalize,
         )
-        try:
-            state = await graph.ainvoke(
-                {"contract_path": resolved_pdf, "errors": []}
-            )
-        finally:
-            await self._pipelines.close()
+        state = await graph.ainvoke(
+            {"contract_path": resolved_pdf, "errors": []}
+        )
 
         return FieldDiscoveryResult.model_validate(
             {
@@ -66,6 +81,7 @@ class DiscoverContractFields:
                 "source_name": state["source_name"],
                 "core": state["core_result"],
                 "candidates": state["field_candidates"],
+                "discovery_metrics": state["discovery_metrics"],
                 "processing": state["processing_metadata"],
             }
         )

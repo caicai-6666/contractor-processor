@@ -35,8 +35,9 @@ try:
     from contract_processor.infrastructure.persistence.yaml_field_catalog import YamlFieldCatalog
     from dotenv import load_dotenv
     from jsonschema import Draft202012Validator
+    from jsonschema.exceptions import ValidationError as JsonSchemaValidationError
     from openai import AsyncOpenAI
-    from pydantic import BaseModel
+    from pydantic import BaseModel, ValidationError as PydanticValidationError
     import yaml
 except ImportError as error:  # 依赖在模型调用前检查，避免产生部分 Attribute 结果。
     raise RuntimeError(
@@ -86,6 +87,34 @@ class StructuredOutputError(RuntimeError):
         super().__init__(message)
         self.finish_reason = finish_reason
         self.metrics = metrics or {}
+
+
+def _structured_validation_detail(error: Exception) -> str:
+    """返回不含模型原始值的结构失败路径，供单字段重试精确纠错。"""
+
+    if isinstance(error, json.JSONDecodeError):
+        return (
+            f"JSON 语法错误：{error.msg}；line={error.lineno}，"
+            f"column={error.colno}，position={error.pos}"
+        )
+    if isinstance(error, JsonSchemaValidationError):
+        path = ".".join(str(item) for item in error.absolute_path) or "<root>"
+        expected = repr(error.validator_value)
+        return (
+            f"JSON Schema 路径 {path} 未通过 {error.validator} 约束，"
+            f"约束值={expected[:300]}"
+        )
+    if isinstance(error, PydanticValidationError):
+        failures = error.errors(
+            include_url=False, include_context=False, include_input=False
+        )
+        rendered = [
+            f"{'.'.join(str(item) for item in failure['loc']) or '<root>'}: "
+            f"{failure['type']}"
+            for failure in failures[:5]
+        ]
+        return "Pydantic 领域包络错误：" + "；".join(rendered)
+    return type(error).__name__
 
 
 def _read_text_sync(path: Path) -> str:
@@ -185,8 +214,9 @@ async def invoke_json(
         return FieldExtractionCandidate.model_validate(decoded), metrics
     except Exception as error:
         raise StructuredOutputError(
-            "模型响应未通过 Attribute JSON Schema 校验。"
-            f"finish_reason={completion.choices[0].finish_reason!r}，请优先检查是否为长度截断。",
+            "模型响应未通过 Attribute 结构校验："
+            + _structured_validation_detail(error)
+            + f"；finish_reason={completion.choices[0].finish_reason!r}。",
             finish_reason=completion.choices[0].finish_reason,
             metrics=metrics,
         ) from error

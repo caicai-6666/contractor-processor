@@ -10,7 +10,7 @@
 以及 Attribute 空目录策略。正式实现是异步、无状态结果传递且无实验落盘副作用的服务。
 
 Attribute 已建立非空 draft 目录，并拆出字段发现端口与独立图；固定字段提取服务已接入
-production，开放字段发现算法仍待实现。空策略只适用于显式空目录，详见
+production，开放字段发现及其全合同集回扫已接入 discovery 批次入口。空策略只适用于显式空目录，详见
 [Attribute 双运行模式设计](../architecture/attribute-operating-modes.md)。
 
 > **正式运行边界：** 正式服务只在内存中传递结果，不写实验产物；开放字段发现与固定 Attribute 提取使用独立服务、DTO 和工作流。
@@ -24,6 +24,7 @@ production，开放字段发现算法仍待实现。空策略只适用于显式�
 - Clause：结构发现、边界归并、候选复核和逐单元原文抽取；
 - Abstract：固定六栏目生成、栏目业务校验和失败栏目局部重试；
 - Attribute：非空目录逐字段受约束提取；显式空目录时确定性返回 `[]`；
+- Field Discovery：候选级准入、批次内语义向量召回、关系归并、组级收敛和冻结字段全量回扫；
 - Validated adapter：统一准备页面、异步模型客户端、Prompt 版本、共享 MLLM 请求门禁和阶段硬门禁。
 
 ---

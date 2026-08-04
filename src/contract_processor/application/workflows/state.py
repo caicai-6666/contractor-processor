@@ -1,7 +1,8 @@
 """两种工作流各自使用的框架无关状态协议。"""
 
 from pathlib import Path
-from typing import TypedDict
+import operator
+from typing import Annotated, Any, TypedDict
 
 
 class PreparedContractState(TypedDict, total=False):
@@ -25,6 +26,26 @@ class ContractProcessingState(PreparedContractState, total=False):
 
 
 class FieldDiscoveryState(PreparedContractState, total=False):
-    """发现模式只包含 Core 上下文和字段候选。"""
+    """发现模式保留 Core、固定 Attribute 上下文和字段候选。"""
 
+    attribute_result: list[dict[str, object]]
     field_candidates: list[dict[str, object]]
+    discovery_metrics: dict[str, object]
+
+
+class FieldDiscoveryBatchState(TypedDict, total=False):
+    """批次父图只传递阶段产物，不泄漏每份合同的可变运行资源。"""
+
+    contract_paths: list[Path]
+    batch_documents: list[dict[str, Any]]
+    stage_one: dict[str, Any]
+    stage_two: dict[str, Any]
+
+
+class FieldDiscoveryStageTwoState(TypedDict, total=False):
+    """第二阶段动态并发任务与 reducer 汇合状态。"""
+
+    extraction_tasks: list[dict[str, Any]]
+    extraction_task: dict[str, Any]
+    observations: Annotated[list[dict[str, Any]], operator.add]
+    stage_two: dict[str, Any]

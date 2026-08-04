@@ -1,0 +1,31 @@
+【任务】
+对一个刚生成的候选字段执行语义准入。只判断字段定义，不得重新提取合同内容，也不得改写候选。
+
+【五种状态】
+- accepted：一个稳定、可跨合同复用的原子业务事实，未被固定字段覆盖，规则与含义一致。
+- covered_by_fixed：字段整体或其实质语义已经被某个固定字段（包括对象子字段）覆盖；此时 covered_by_field_id 必须填写对应固定 field_id。
+- non_atomic：候选把至少两个可独立缺失、独立检索或独立治理的业务问题装进一个宽泛容器；必须在 reason 中明确指出这两个或更多独立问题。
+- not_attribute：候选不是合同正文明确陈述或约定的业务事实，而是从文件载体本身推知的语言、页数、格式、扫描/OCR 质量、字体版式等文档属性，或不具备合同字段治理价值。
+- invalid_rule：extraction_rule 或子字段规则与字段 name/meaning 不一致，混入其他业务领域，或仍依赖页码、条款号、章节标题、版式位置及当前合同专属表达。
+
+【判定要求】
+- 优先按业务事实判断覆盖关系，不能只比较 field_id、名称或 output 类型。
+- 固定 object 的某个子字段足以覆盖候选时，也应判 covered_by_fixed。
+- 同一事实的原文版、结构化版、枚举版或查询切片不构成新字段。
+- 普通合同序言中的“经协商达成如下协议、共同遵守/恪守”不构成初步协议或后续签署承诺；没有意向、预签、草签、框架协议或另行签署等明示事实时，应判 not_attribute。
+- 把付款触发事件、付款期限和逾期后果同时装入“付款条件”会合并至少三个可独立缺失的问题，应判 non_atomic；付款安排内部同一阶段的名称、比例、金额和直接绑定条件仍可作为不可分割结构。
+- 原子性按“一个稳定业务问题”判断，不按值的数量或 JSON 外形判断。同一事实的多次出现、多种可选值、数组表示，以及金额加单位、期限起点加时长等不可分割的结构化组成，不因此成为 non_atomic。
+- non_atomic 所列出的多个问题必须实际同时存在于当前候选的 meaning、output 或 extraction_rule 中。若候选只描述 A，而相关的 B 不在候选定义内，“A 与 B 可独立”恰好说明 A 是原子字段，不能据此拒绝 A。
+- 字段来自合同条款、可同时保留 Clause 原文、需要结合合同金额理解，均不构成 non_atomic 或覆盖理由；只要它本身是稳定、可查询的一个业务事实，就可以 accepted。
+- 覆盖关系只能指向下方列出的固定 Core/Attribute；不得臆造 `contract_clauses`、`clause` 或其他未提供字段作为覆盖依据。
+- covered_by_fixed 可引用的 field_id 仅限：{{FIXED_FIELD_IDS}}。没有准确目标时不得输出 covered_by_fixed。
+- proposal_index 必须固定输出为 {{PROPOSAL_INDEX}}；reason 最后必须写明“因此 status=<status>”。
+- 非 covered_by_fixed 状态的 covered_by_field_id 必须为 null。
+
+{{FIXED_FIELD_DEFINITIONS}}
+
+【待审候选】
+{{CANDIDATE_DEFINITION}}
+
+【输出】
+只输出一个候选语义准入 JSON 对象。reason 在 status 之前。

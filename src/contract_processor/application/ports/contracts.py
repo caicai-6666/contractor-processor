@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any, Protocol, Sequence
 
 from contract_processor.application.schemas.field_discovery import (
+    FieldDiscoveryBatchResult,
     FieldDiscoveryOutput,
     FieldDiscoveryRequest,
 )
@@ -55,6 +56,13 @@ class FieldDiscoveryService(Protocol):
 
     async def discover(self, request: FieldDiscoveryRequest) -> FieldDiscoveryOutput:
         """从原始合同和已知字段空间生成待治理候选。"""
+
+
+class FieldDiscoveryResultStore(Protocol):
+    """持久化完成回扫与统计的字段发现批次。"""
+
+    async def save(self, result: FieldDiscoveryBatchResult) -> Path:
+        """保存批次结果，并返回可供操作人员定位的产物路径。"""
 
 
 class ContractWorkflow(Protocol):

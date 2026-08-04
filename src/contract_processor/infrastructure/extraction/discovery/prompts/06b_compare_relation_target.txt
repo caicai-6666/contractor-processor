@@ -1,0 +1,5 @@
+【待比较候选】
+{{TARGET_CANDIDATE}}
+
+【输出】
+只输出当前字段对的 JSON。最后两个键必须依次为 reason、relation：reason 先写具体边界依据（最长 1200 字符），其最后必须精确以“因此 relation=<本对象的 relation 值>”收尾，末尾不得再加标点或文字；随后在 relation 写入同一个选择。例如 relation 为 unrelated 时，reason 必须以“因此 relation=unrelated”收尾。对象键严格按 Schema 顺序输出。

@@ -1,0 +1,23 @@
+【任务】
+对一个关系图连通的候选组规划最终字段身份。连通只表示这些字段应一起治理，不表示所有候选同义。当前步骤只决定合并、分拆或淘汰，不生成 output。
+
+【唯一去向规则】
+- 每个输入 candidate_id 必须且只能出现一次：属于一个 final_field_plan，或进入 discarded_candidates。
+- final_field_plans 与 discarded_candidates 不得同时为空；不确定是否保留时也不得省略，应先建立独立 plan，只有明确低价值时才 discarded。
+- 同一顶层业务事实的原文版、结构化版或枚举版应进入同一个 plan。若窄字段只是宽结构字段某个
+  子字段加筛选条件形成的查询切片（例如“预付款比例”只是“付款阶段[].付款比例”按阶段过滤），
+  它没有新增字段知识，必须进入 discarded_candidates；不得建立独立 plan，也不得并入同一 plan
+  后污染 aliases。
+- 语义相关但可独立缺失、检索或治理的事实应进入不同 plan。
+- 只与宽泛 object 的某个子字段相同，不代表应继承整个 object 身份。
+- 低价值、一次性编号、过宽泛容器或无法形成稳定元数据的候选应淘汰。
+- plan_id 从 field_plan_01 开始连续编号；name 必须是可读的中文业务名称，不得填写 field_id；meaning 描述最终字段，boundary 说明与同组其他事实的边界。
+
+【必须逐一处置的候选 ID】
+{{REQUIRED_CANDIDATE_IDS}}
+
+【输入候选组】
+{{GROUP_PROFILE}}
+
+【输出】
+只输出 JSON。reason 先说明规划依据，最后精确以“因此 decision=refine_group”收尾；随后 decision=refine_group。

@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-import base64
 import os
 from pathlib import Path
 from typing import Any, Protocol
 
 from dotenv import load_dotenv
-import fitz
 import httpx
 from openai import AsyncOpenAI
 import yaml
@@ -38,6 +36,7 @@ from contract_processor.infrastructure.extraction.core import CoreExtractionServ
 from contract_processor.infrastructure.extraction.stage_result import StageResult
 from contract_processor.infrastructure.llm.request_limiter import ModelRequestLimiter
 from contract_processor.infrastructure.pdf.document_identity import compute_document_id
+from contract_processor.infrastructure.pdf.rendering import _render_pdf_pages_sync
 from contract_processor.infrastructure.persistence.yaml_field_catalog import YamlFieldCatalog
 from contract_processor.settings import ProjectSettings
 
@@ -93,8 +92,18 @@ class ValidatedExtractionPipelines:
         self._core_catalog_snapshot = core_catalog_snapshot
         self._attribute_catalog_snapshot = attribute_catalog_snapshot
         self._field_catalog = field_catalog or YamlFieldCatalog(
-            core_path=project_root / settings.paths.core_fields,
-            attribute_path=project_root / settings.paths.attribute_fields,
+            core_path=project_root
+            / (
+                settings.paths.discovery_core_fields
+                if runtime_mode is RuntimeMode.DISCOVERY
+                else settings.paths.core_fields
+            ),
+            attribute_path=project_root
+            / (
+                settings.paths.discovery_attribute_fields
+                if runtime_mode is RuntimeMode.DISCOVERY
+                else settings.paths.attribute_fields
+            ),
         )
         self._field_discovery_service = field_discovery_service
         self._core_service = core_service or CoreExtractionService()
@@ -103,7 +112,12 @@ class ValidatedExtractionPipelines:
         self._attribute_service = attribute_service or AttributeExtractionService()
         self._empty_attribute_service = (
             empty_attribute_service or EmptyAttributeExtractionService(
-            project_root / settings.paths.attribute_fields
+            project_root
+            / (
+                settings.paths.discovery_attribute_fields
+                if runtime_mode is RuntimeMode.DISCOVERY
+                else settings.paths.attribute_fields
+            )
             )
         )
         self._context: PdfExtractionContext | None = None
@@ -114,6 +128,7 @@ class ValidatedExtractionPipelines:
         )
         self._prompt_version: str | None = None
         self._core_understanding_bullets: str | None = None
+        self._field_discovery_metrics: dict[str, Any] = {}
 
     @property
     def model_name(self) -> str:
@@ -208,36 +223,10 @@ class ValidatedExtractionPipelines:
     def _render_pdf(self, resolved: Path) -> tuple[list[dict[str, Any]], int]:
         """PyMuPDF 是阻塞 API；调用方负责在线程中运行本方法。"""
 
-        document = fitz.open(resolved)
-        try:
-            page_count = document.page_count
-            max_pages = self._settings.models.mllm.vision.max_pages_per_request
-            if page_count < 1:
-                raise ValueError("PDF 不包含可渲染页面。")
-            if page_count > max_pages:
-                raise ValueError(
-                    f"PDF 共 {page_count} 页，超过配置上限 {max_pages} 页；"
-                    "统一工作流不会静默截断合同。"
-                )
-            images: list[dict[str, Any]] = []
-            for index in range(page_count):
-                # 约 144 DPI 在小型合同上兼顾可读性与视觉 token；三条线路复用同一份字节。
-                pixmap = document.load_page(index).get_pixmap(
-                    matrix=fitz.Matrix(2, 2), alpha=False
-                )
-                image_bytes = pixmap.tobytes("png")
-                images.append(
-                    {
-                        "page": index + 1,
-                        "data_url": "data:image/png;base64,"
-                        + base64.b64encode(image_bytes).decode("ascii"),
-                        "image_bytes": len(image_bytes),
-                    }
-                )
-        finally:
-            document.close()
-
-        return images, page_count
+        return _render_pdf_pages_sync(
+            resolved,
+            max_pages=self._settings.models.mllm.vision.max_pages_per_request,
+        )
 
     async def extract_core(self, pdf_path: Path) -> dict[str, Any]:
         result = await self._core_service.extract(await self._shared_context(pdf_path))
@@ -282,7 +271,10 @@ class ValidatedExtractionPipelines:
         return result.payload
 
     async def discover_fields(
-        self, pdf_path: Path, core: dict[str, Any]
+        self,
+        pdf_path: Path,
+        core: dict[str, Any],
+        attributes: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
         """把共享 PDF、已知字段目录和 Core 结果交给独立发现端口。"""
 
@@ -315,11 +307,19 @@ class ValidatedExtractionPipelines:
             core_definitions=core_snapshot.definitions,
             core_result=core,
             attribute_definitions=attribute_snapshot.definitions,
+            attribute_result=tuple(attributes),
         )
         output = await self._field_discovery_service.discover(request)
+        self._field_discovery_metrics = dict(output.metrics)
         if not all(isinstance(candidate, dict) for candidate in output.candidates):
             raise RuntimeError("字段发现服务必须返回对象形式的候选。")
         return [dict(candidate) for candidate in output.candidates]
+
+    @property
+    def field_discovery_metrics(self) -> dict[str, Any]:
+        """当前合同 discovery 服务返回的非敏感审计指标。"""
+
+        return dict(self._field_discovery_metrics)
 
     async def extract_clauses(self, pdf_path: Path) -> dict[str, Any]:
         if self._runtime_mode is not RuntimeMode.PRODUCTION:
@@ -358,8 +358,8 @@ class ValidatedExtractionPipelines:
         """发现模式不读取 Clause 或摘要规范。"""
 
         paths = {
-            "core_schema_version": self._settings.paths.core_fields,
-            "attribute_schema_version": self._settings.paths.attribute_fields,
+            "core_schema_version": self._settings.paths.discovery_core_fields,
+            "attribute_schema_version": self._settings.paths.discovery_attribute_fields,
         }
         values = await asyncio.gather(
             *(

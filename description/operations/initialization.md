@@ -39,15 +39,16 @@ python -m contract_processor.interfaces.cli.inspect_fields
 - PDF 单次异步隔离渲染与三条 MLLM 线路共享；
 - `production`：`prepare` 后并发执行 Core→（非空时 Attribute）、Clause、Abstract，并在
   汇合后输出候选的异步 LangGraph 图；
-- `discovery`：Core/空 Core → Field Discovery 的独立图，不注册 Clause 和 Abstract；
+- `discovery`：Core/空 Core → 固定 Attribute → Field Discovery 的独立图，不注册 Clause 和 Abstract；
 - 生产 0 Core 启动门禁、发现 0 Core 空策略和字段目录空状态校验；
-- `FieldDiscoveryService` 接入端口与独立 `FieldDiscoveryResult`，默认未注入时 fail closed；
+- 正式 `FieldDiscoveryService`：候选级准入、Embedding Top 5、关系图、并发组级收敛和全局门禁；
+- `DiscoverFieldsFromBatch` 两阶段父图：冻结最终字段后按“单合同、单字段”回扫并聚合频率；
 - `interfaces/cli/` 下的无落盘单文件和批量入口；
 - FastAPI 前后端 DTO 与依赖边界（当前无路由）；
 - 由 Core YAML 异步生成的 Elasticsearch mapping 与专家确认异步写入 Repository。
 
-尚未实现自动字段发现/归并、发现批次治理用例、专家 UI、Embedding 实际调用和 FastAPI
-路由。当前 Attribute 规范源已包含 10 个 `0.3/draft` 字段，并由 production 固定提取器逐字段
+尚未实现专家 UI、候选人工晋级写回、Attribute Profile 版本治理和 FastAPI 路由。当前
+Attribute 规范源已包含 10 个 `0.3/draft` 字段，并由 production 固定提取器逐字段
 处理；禁止跳过非空目录或静默退化成空数组、关键字匹配数组。正式持久化必须位于专家最终
 校验之后。目标模式见
 [Attribute 双运行模式设计](../architecture/attribute-operating-modes.md)，当前生产边界见
@@ -55,4 +56,4 @@ python -m contract_processor.interfaces.cli.inspect_fields
 已确认的字段发现目录隔离、新候选专用内存向量池、Top 5 三分类和全量回扫统计见
 [字段发现两阶段工作流](../architecture/field-discovery-workflow.md)。
 
-> **当前限制：** 未实现的字段发现默认算法、专家 UI、Embedding 实际调用和 FastAPI 路由必须显式保持未注册或 fail closed；不能以空结果伪造功能可用。
+> **当前限制：** 发现结果仍是待专家审核的知识包，不能自动写入生产字段目录或 Elasticsearch；未实现的专家治理与 FastAPI 路由必须保持未注册或 fail closed。

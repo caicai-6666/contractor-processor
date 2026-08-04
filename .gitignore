@@ -27,5 +27,20 @@ data/contracts/*
 experiments/outputs/*
 !experiments/outputs/.gitkeep
 
+# 本地测试与历史实验仅保留在工作区，不进入版本库。
+/tests/
+/experiments/*/
+!/experiments/field_discovery_batch_report/
+!/experiments/field_discovery_batch_report/*.py
+!/experiments/field_discovery_batch_report/*.md
+!/experiments/field_discovery_batch_report/*.yaml
+!/experiments/contract_vector_retrieval/
+!/experiments/contract_vector_retrieval/*.py
+!/experiments/contract_vector_retrieval/*.md
+!/experiments/contract_vector_retrieval/*.yaml
+
+# 字段发现的每次运行结果属于本地实验产物。
+/data/definitions/discovery/result/
+
 # IDE
 .idea/

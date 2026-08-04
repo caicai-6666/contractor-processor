@@ -1,0 +1,8 @@
+{{PAGE_VISIBILITY_CONTEXT}}
+
+{{CORE_STATUS_CONTEXT}}
+
+{{ATTRIBUTE_STATUS_CONTEXT}}
+
+【执行】
+现在直接阅读以上全部 PDF 页面，并依据图像前的字段发现任务、固定覆盖约束与本合同提取状态，输出候选 JSON。

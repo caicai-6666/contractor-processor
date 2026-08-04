@@ -5,6 +5,8 @@ from typing import Any
 
 from contract_processor.application.workflows.state import (
     ContractProcessingState,
+    FieldDiscoveryBatchState,
+    FieldDiscoveryStageTwoState,
     FieldDiscoveryState,
 )
 
@@ -71,6 +73,9 @@ class LangGraphWorkflowFactory:
         *,
         prepare: Callable[[FieldDiscoveryState], Awaitable[dict[str, Any]]],
         extract_core: Callable[[FieldDiscoveryState], Awaitable[dict[str, Any]]],
+        extract_attributes: Callable[
+            [FieldDiscoveryState], Awaitable[dict[str, Any]]
+        ],
         discover_fields: Callable[[FieldDiscoveryState], Awaitable[dict[str, Any]]],
         finalize: Callable[[FieldDiscoveryState], Awaitable[dict[str, Any]]],
     ) -> Any:
@@ -81,11 +86,74 @@ class LangGraphWorkflowFactory:
         graph = StateGraph(FieldDiscoveryState)
         graph.add_node("prepare", prepare)
         graph.add_node("extract_core", extract_core)
+        graph.add_node("extract_attributes", extract_attributes)
         graph.add_node("discover_fields", discover_fields)
         graph.add_node("finalize", finalize)
         graph.add_edge(START, "prepare")
         graph.add_edge("prepare", "extract_core")
-        graph.add_edge("extract_core", "discover_fields")
+        graph.add_edge("extract_core", "extract_attributes")
+        graph.add_edge("extract_attributes", "discover_fields")
         graph.add_edge("discover_fields", "finalize")
         graph.add_edge("finalize", END)
+        return graph.compile()
+
+    def build_field_discovery_batch(
+        self,
+        *,
+        run_stage_one: Callable[
+            [FieldDiscoveryBatchState], Awaitable[dict[str, Any]]
+        ],
+        run_stage_two: Callable[
+            [FieldDiscoveryBatchState], Awaitable[dict[str, Any]]
+        ],
+    ) -> Any:
+        """组装 discovery 的两阶段父图。
+
+        第一阶段和第二阶段在拓扑上顺序相连；第二阶段只能读取第一阶段冻结产物，不能回写
+        候选身份，也不能在未实现时生成虚假的统计数字。
+        """
+
+        from langgraph.graph import END, START, StateGraph
+
+        graph = StateGraph(FieldDiscoveryBatchState)
+        graph.add_node("stage_one_discovery", run_stage_one)
+        graph.add_node("stage_two_statistics", run_stage_two)
+        graph.add_edge(START, "stage_one_discovery")
+        graph.add_edge("stage_one_discovery", "stage_two_statistics")
+        graph.add_edge("stage_two_statistics", END)
+        return graph.compile()
+
+    def build_field_discovery_stage_two(
+        self,
+        *,
+        extract_candidate_field: Callable[
+            [FieldDiscoveryStageTwoState], Awaitable[dict[str, Any]]
+        ],
+        calculate_candidate_statistics: Callable[
+            [FieldDiscoveryStageTwoState], Awaitable[dict[str, Any]]
+        ],
+    ) -> Any:
+        """构建单字段动态扇出和频率统计两节点子图。"""
+
+        from langgraph.graph import END, START, StateGraph
+        from langgraph.types import Send
+
+        def dispatch_tasks(state: FieldDiscoveryStageTwoState) -> Any:
+            tasks = state.get("extraction_tasks", [])
+            if not tasks:
+                return "calculate_candidate_statistics"
+            # 每个 Send 只携带一份合同与一个字段，禁止退化为多字段批量提取。
+            return [
+                Send("extract_candidate_field", {"extraction_task": task})
+                for task in tasks
+            ]
+
+        graph = StateGraph(FieldDiscoveryStageTwoState)
+        graph.add_node("extract_candidate_field", extract_candidate_field)
+        graph.add_node(
+            "calculate_candidate_statistics", calculate_candidate_statistics
+        )
+        graph.add_conditional_edges(START, dispatch_tasks)
+        graph.add_edge("extract_candidate_field", "calculate_candidate_statistics")
+        graph.add_edge("calculate_candidate_statistics", END)
         return graph.compile()

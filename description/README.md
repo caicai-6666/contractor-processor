@@ -91,6 +91,7 @@
 - [合同终审入库实验](experiments/contract-ingestion.md)
 - [合同视觉检索实验](experiments/contract-visual-retrieval.md)
 - [合同视觉鲁棒性实验](experiments/contract-visual-robustness.md)
+- [合同四向量内存召回实验](experiments/contract-vector-retrieval.md)
 
 > **实验分析：** 当任务涉及某次实验的结果分析时，除对话结论外，还必须在该运行输出目录的 `analysis.md` 中追加记录。具体格式与证据要求以项目根目录的 `AGENTS.md` 为准。
 
