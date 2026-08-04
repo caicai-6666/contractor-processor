@@ -213,6 +213,10 @@ class TimedExtractionPipelines:
     def attribute_catalog_mode(self) -> str:
         return self._wrapped.attribute_catalog_mode
 
+    @property
+    def attribute_extraction_metrics(self) -> dict[str, Any]:
+        return getattr(self._wrapped, "attribute_extraction_metrics", {})
+
     async def _measure(
         self, stage: str, operation: Callable[[], Awaitable[Any]]
     ) -> Any:
@@ -341,9 +345,13 @@ async def run_experiment(args: argparse.Namespace) -> tuple[Path, dict[str, Any]
             )
             result = await use_case.execute(pdf_path)
             payload = result.model_dump(mode="json", exclude={"document_id"})
+            attribute_status = payload["processing"]["attribute_extraction"][
+                "status"
+            ]
             report.update(
                 {
                     "status": "succeeded",
+                    "attribute_extraction_status": attribute_status,
                     "processing": payload["processing"],
                     "counts": _result_counts(payload),
                     "core": payload["core"],
@@ -410,6 +418,10 @@ async def run_experiment(args: argparse.Namespace) -> tuple[Path, dict[str, Any]
     completed_at = datetime.now(UTC)
     succeeded = sum(item["status"] == "succeeded" for item in summaries)
     failed = len(summaries) - succeeded
+    partial_attribute = sum(
+        item.get("attribute_extraction_status") == "completed_with_failures"
+        for item in summaries
+    )
     measured_cache = [
         item["cache"]
         for item in summaries
@@ -420,13 +432,16 @@ async def run_experiment(args: argparse.Namespace) -> tuple[Path, dict[str, Any]
     summary = {
         "experiment": "full_extraction_batch",
         "run_id": run_id,
-        "status": "completed_with_failures" if failed else "completed",
+        "status": (
+            "completed_with_failures" if failed or partial_attribute else "completed"
+        ),
         "started_at": started_at.isoformat(),
         "completed_at": completed_at.isoformat(),
         "batch": {
             "contract_count": len(pdf_paths),
             "succeeded_contract_count": succeeded,
             "failed_contract_count": failed,
+            "partial_attribute_contract_count": partial_attribute,
             "wall_clock_seconds": round(time.perf_counter() - batch_started, 3),
             "average_contract_seconds": round(
                 sum(item["timing"]["wall_clock_seconds"] for item in summaries)

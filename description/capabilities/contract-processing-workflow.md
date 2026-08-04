@@ -18,7 +18,9 @@
 逐字段处理；只有显式空目录才跳过 Attribute 节点并输出空列表。Attribute 复用 Core Step 1
 的合同理解地图及成功 Core 的简洁上下文，但仍以原始 PDF 为唯一事实来源。
 
-> **生产边界：** Core 目录必须非空；只有显式空 Attribute 目录才可跳过节点并返回 `attribute: []`。非空目录不得以空结果伪装成功。
+> **生产边界：** Core 目录必须非空；只有显式空 Attribute 目录才可跳过整个节点。活动目录中的
+> 单字段可以在初次提取和一次纠错均失败后被省略，但必须在 `processing.attribute_extraction`
+> 中明确记录，不能伪装为 `not_found`。
 
 ---
 
@@ -29,10 +31,11 @@
 - 通过 LangGraph `ainvoke()` 异步执行生产分支：`prepare` 后并发启动 Core、Clause、
   Abstract，Core 完成后才启动 Attribute，并只在 Attribute 目录非空时注册其固定提取节点；
 - 直接在内存中传递每个阶段的业务结果、校验状态和指标；
-- 任一阶段校验失败时拒绝形成成功候选；
+- Core、Clause 或 Abstract 阶段校验失败时拒绝形成成功候选；Attribute 字段失败局部降级；
 - 返回模型、Prompt 和四份机器规范版本，支持后续终审与复现。
 
-> **成功条件：** 每条已注册业务分支都必须通过自身阶段校验；任一阶段不合法时，工作流只能失败，不能形成部分成功候选。
+> **成功条件：** Core、Clause 与 Abstract 必须通过各自阶段校验。Attribute 可以返回
+> `completed_with_failures` 的局部结果，专家终审前必须结合处理诊断确认或重试缺失字段。
 
 ---
 
@@ -69,8 +72,8 @@ python -m contract_processor.interfaces.cli.run_single_file \
   并发执行。所有正式模型调用共享 `models.mllm.max_concurrent_requests`（默认 3）门禁，
   因此异步执行不等同于无界并发。
 - Attribute 目录为空时，构图器不注册 Attribute 子图，初始状态提供稳定空数组；因此不会
-  调用空服务或模型。目录非空时注册固定 Attribute 提取器，字段缺失或包络无效时由阶段门禁
-  拒绝生成成功候选。
+  调用空服务或模型。目录非空时注册固定 Attribute 提取器；单字段包络或业务校验失败只重试
+  当前字段一次，仍失败则省略该字段并记录诊断，不重写或丢弃其他成功字段。
 - 本用例遵循生产封闭世界约束：未来 Attribute 目录非空时只能按固定 Schema 提取，不能在
   `ProcessContract` 中发现、归并或创建字段。
 - 生产 `ContractProcessingResult` 保持现有对外协议；发现结果使用独立 DTO，不能写入合同
@@ -78,6 +81,8 @@ python -m contract_processor.interfaces.cli.run_single_file \
 - `StageResult` 同时承载 payload、validation 和 metrics，取代“写校验 JSON 后再读取”的
   文件通信方式。
 - `ProcessingMetadata` 不再包含本机 `run_directory`，避免部署路径泄漏到 API 或索引协议。
+- `ProcessingMetadata.attribute_extraction` 区分完整成功和局部成功，并列出跳过字段；技术失败
+  不得转换成业务状态 `not_found`。
 - `ProcessContract` 的 `finally` 始终异步关闭模型客户端，失败时也不会遗留连接。
 - 阻塞 PDF/YAML/哈希操作通过 `run_blocking()` 隔离；纯校验、Schema 和领域计算保持同步，
   避免没有收益的 `async` 包装。

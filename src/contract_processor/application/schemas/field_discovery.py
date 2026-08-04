@@ -94,6 +94,7 @@ class FieldDiscoveryStageOneResult(StrictSchema):
     document_count: int = Field(ge=0)
     succeeded_document_count: int = Field(ge=0)
     failed_document_count: int = Field(ge=0)
+    partial_attribute_document_count: int = Field(ge=0)
     raw_candidate_count: int = Field(ge=0)
     candidate_identity_count: int = Field(ge=0)
     source_group_count: int = Field(ge=0)
@@ -107,6 +108,7 @@ class FieldDiscoveryStageOneResult(StrictSchema):
     candidate_count: int = Field(ge=0)
     documents: list[FieldDiscoveryResult]
     failed_documents: list[dict[str, str]]
+    partial_attribute_documents: list[dict[str, Any]]
     candidate_pool: list[dict[str, Any]]
     relation_graph: dict[str, Any]
     group_refinements: list[dict[str, Any]]

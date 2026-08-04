@@ -32,7 +32,9 @@ experiments/outputs/field_discovery_batch_report/<run_id>/
 2. `fields[].statistics`：命中合同数、总合同数、命中率和命中 PDF 文件名；
 3. `batch.wall_clock_seconds`：从缓存前快照到结果完成的批次墙钟时间；
 4. `batch.average_cache_hit_rate_percent`：整个字段发现批次内，以 vLLM prefix cache 查询量加权的
-   平均缓存命中率。
+   平均缓存命中率；
+5. `summary.partial_attribute_document_count` 与 `stage_one_failures`：区分整份第一阶段失败和
+   Attribute 单字段重试后仍失败的局部成功合同，并列出跳过字段及脱敏原因。
 
 命中率使用 `found_document_count / distinct_document_count`，即正式 DTO 的
 `conservative_frequency`；技术失败仍留在总分母中，不能通过缩小分母抬高汇报值。缓存计数不可用

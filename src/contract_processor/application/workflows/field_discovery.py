@@ -28,6 +28,10 @@ class FieldDiscoveryPipelines(Protocol):
         """返回固定 Attribute 目录的 empty_catalog 或 active_catalog。"""
 
     @property
+    def attribute_extraction_metrics(self) -> dict[str, Any]:
+        """返回固定 Attribute 成功数、跳过字段与字段级失败诊断。"""
+
+    @property
     def field_discovery_metrics(self) -> dict[str, Any]:
         """返回当前合同候选生成、门禁与身份归并的审计指标。"""
 
@@ -83,9 +87,13 @@ class FieldDiscoveryNodes:
             state["core_result"],
             state["attribute_result"],
         )
+        discovery_metrics = self._pipelines.field_discovery_metrics
+        discovery_metrics["attribute_extraction"] = (
+            self._pipelines.attribute_extraction_metrics
+        )
         return {
             "field_candidates": candidates,
-            "discovery_metrics": self._pipelines.field_discovery_metrics,
+            "discovery_metrics": discovery_metrics,
         }
 
     async def finalize(self, state: FieldDiscoveryState) -> dict[str, Any]:

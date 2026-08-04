@@ -129,6 +129,7 @@ class ValidatedExtractionPipelines:
         self._prompt_version: str | None = None
         self._core_understanding_bullets: str | None = None
         self._field_discovery_metrics: dict[str, Any] = {}
+        self._attribute_extraction_metrics: dict[str, Any] = {}
 
     @property
     def model_name(self) -> str:
@@ -163,6 +164,12 @@ class ValidatedExtractionPipelines:
                 else "active_catalog"
             )
         return "empty_catalog"
+
+    @property
+    def attribute_extraction_metrics(self) -> dict[str, Any]:
+        """返回当前合同固定 Attribute 的完整性与失败字段诊断。"""
+
+        return dict(self._attribute_extraction_metrics)
 
     @property
     def prepared_context(self) -> PdfExtractionContext:
@@ -267,7 +274,34 @@ class ValidatedExtractionPipelines:
                 core_fields=core,
                 contract_understanding_bullets=understanding_bullets,
             )
-        self._require_stage_valid("Attribute", result.validation, result.metrics)
+        is_valid = result.validation.get("is_valid") is True
+        failed_fields = [
+            {
+                key: record.get(key)
+                for key in (
+                    "field_id",
+                    "attempt_count",
+                    "error_type",
+                    "error",
+                    "finish_reason",
+                    "metrics",
+                )
+            }
+            for record in result.metrics.get("fields", [])
+            if record.get("status") == "failed"
+        ]
+        self._attribute_extraction_metrics = {
+            "status": "completed" if is_valid else "completed_with_failures",
+            "validation": dict(result.validation),
+            "skipped_field_ids": list(result.validation.get("missing_field_ids", [])),
+            "successful_field_count": result.metrics.get("successful_field_count", 0),
+            "failed_field_count": result.metrics.get("failed_field_count", 0),
+            "failed_fields": failed_fields,
+        }
+        # 活动 Attribute 目录允许局部成功：失败字段跳过，成功字段继续进入发现或终审候选。
+        # 技术失败保留在 processing 诊断中，绝不能伪装为业务 not_found。
+        if not is_valid and result.validation.get("mode") != "active_catalog":
+            self._require_stage_valid("Attribute", result.validation, result.metrics)
         return result.payload
 
     async def discover_fields(

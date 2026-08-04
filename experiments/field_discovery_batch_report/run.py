@@ -304,6 +304,11 @@ async def run_experiment(args: argparse.Namespace) -> tuple[Path, dict[str, Any]
             "prompt_version": result.processing.prompt_version,
         },
         "summary": {
+            "succeeded_document_count": result.stage_one.succeeded_document_count,
+            "failed_document_count": result.stage_one.failed_document_count,
+            "partial_attribute_document_count": (
+                result.stage_one.partial_attribute_document_count
+            ),
             # 该数值是通过单文档语义准入后的候选观测总数，并非模型原始生成条数。
             "accepted_candidate_observation_count": result.stage_one.raw_candidate_count,
             "candidate_identity_count": result.stage_one.candidate_identity_count,
@@ -311,6 +316,12 @@ async def run_experiment(args: argparse.Namespace) -> tuple[Path, dict[str, Any]
             "discovered_field_count": len(result.stage_one.frozen_candidates),
             "extraction_task_count": result.stage_two.task_count,
             "failed_extraction_task_count": result.stage_two.failed_task_count,
+        },
+        "stage_one_failures": {
+            "failed_documents": result.stage_one.failed_documents,
+            "partial_attribute_documents": (
+                result.stage_one.partial_attribute_documents
+            ),
         },
         "fields": build_field_rows(
             frozen_candidates=result.stage_one.frozen_candidates,

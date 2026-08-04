@@ -580,8 +580,6 @@ async def run_attribute_extraction(
             }
         )
 
-    if not merged_fields:
-        raise RuntimeError("所有 Attribute 字段提取均失败，无法生成合并结果。")
     expected_field_id_set = set(expected_field_ids)
     missing_field_ids = sorted(expected_field_id_set - set(merged_fields))
     invalid_field_envelopes = [

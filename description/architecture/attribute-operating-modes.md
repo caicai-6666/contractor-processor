@@ -304,7 +304,8 @@ LangGraph 只负责拓扑和状态传递，不决定候选能否成为 Core，�
 当前 `data/definitions/attribute.yaml` 为 `0.3/draft`，包含 10 个专家预置字段，具体定义和
 边界见 [Attribute 字段设计](../fields/attribute/attribute.md)。这些字段用于下一阶段固定 Schema
 提取器的真实合同验证，不是 discovery 自动生成的结果。production 会在非空目录时注册逐字段
-提取器，不能返回空列表伪装成功。
+提取器。字段成功调用后必须返回合法业务终态；初次调用和一次纠错都失败的字段可以省略，但
+必须在处理诊断中标记为技术失败，不能用空列表或 `not_found` 伪装完整成功。
 
 ### 已完成
 
@@ -317,7 +318,8 @@ LangGraph 只负责拓扑和状态传递，不决定候选能否成为 Core，�
 7. CLI `--mode` 与 production/discovery 拓扑、0/非0 Core 的回归测试。
 8. 生产 Attribute 空目录条件构图：不注册 Attribute 节点且稳定返回空结果。
 9. 专家预置的 `0.3/draft` Attribute 初始目录及递归字段定义。
-10. 固定 Attribute 逐字段提取、动态 JSON Schema、字段级失败隔离与最终覆盖门禁。
+10. 固定 Attribute 逐字段提取、动态 JSON Schema、单字段一次纠错，以及保留成功字段的局部
+    降级和失败诊断。
 11. Core Step 1 合同理解地图和成功 Core 简洁上下文的内存级复用；原始 PDF 仍为事实来源。
 12. 正式字段发现默认服务：单候选并发准入、批次向量池、逐对关系判断和组级收敛。
 13. `DiscoverFieldsFromBatch` 第二阶段：冻结字段 × 去重合同的逐字段并发回扫与确定性频率统计。

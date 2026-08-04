@@ -23,6 +23,10 @@ class ContractExtractionPipelines(Protocol):
     def attribute_catalog_mode(self) -> str:
         """返回 empty_catalog 或 active_catalog，供生产图决定是否注册节点。"""
 
+    @property
+    def attribute_extraction_metrics(self) -> dict[str, Any]:
+        """返回 Attribute 完整性、跳过字段与失败诊断。"""
+
     async def prepare(self, pdf_path: Path) -> dict[str, Any]:
         """计算文档身份、渲染页面并建立共享模型会话。"""
 
@@ -86,11 +90,23 @@ class ContractProcessingNodes:
         }
 
     async def finalize(self, state: ContractProcessingState) -> dict[str, Any]:
+        attribute_diagnostics = getattr(
+            self._pipelines,
+            "attribute_extraction_metrics",
+            {
+                "status": "completed",
+                "skipped_field_ids": [],
+                "successful_field_count": len(state.get("attribute_result", [])),
+                "failed_field_count": 0,
+                "failed_fields": [],
+            },
+        )
         return {
             "processing_metadata": {
                 "model": self._pipelines.model_name,
                 "prompt_version": self._pipelines.prompt_version,
                 "source_page_count": state["source_page_count"],
+                "attribute_extraction": attribute_diagnostics,
                 **await self._pipelines.schema_versions(),
             }
         }

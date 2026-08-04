@@ -135,6 +135,7 @@ class DiscoverFieldsFromBatch:
         async def run_stage_one(state: dict[str, Any]) -> dict[str, Any]:
             documents: list[FieldDiscoveryResult] = []
             failed_documents: list[dict[str, str]] = []
+            partial_attribute_documents: list[dict[str, Any]] = []
             raw_candidates: list[dict[str, Any]] = []
             for document_index, path in enumerate(state["contract_paths"], start=1):
                 await self._emit(
@@ -158,6 +159,29 @@ class DiscoverFieldsFromBatch:
                     )
                     continue
                 documents.append(document)
+                attribute_diagnostics = document.discovery_metrics.get(
+                    "attribute_extraction", {}
+                )
+                skipped_attribute_ids = attribute_diagnostics.get(
+                    "skipped_field_ids", []
+                )
+                if attribute_diagnostics.get("status") == "completed_with_failures":
+                    partial_attribute_documents.append(
+                        {
+                            "source_name": document.source_name,
+                            "document_id": document.document_id,
+                            "skipped_field_ids": skipped_attribute_ids,
+                            "successful_field_count": attribute_diagnostics.get(
+                                "successful_field_count", 0
+                            ),
+                            "failed_field_count": attribute_diagnostics.get(
+                                "failed_field_count", 0
+                            ),
+                            "failed_fields": attribute_diagnostics.get(
+                                "failed_fields", []
+                            ),
+                        }
+                    )
                 for index, definition in enumerate(document.candidates, start=1):
                     raw_candidates.append(
                         {
@@ -172,7 +196,8 @@ class DiscoverFieldsFromBatch:
                     f"{path.name} 完成：模型候选="
                     f"{document.discovery_metrics.get('model_candidate_count', 0)}，"
                     f"准入={document.discovery_metrics.get('accepted_candidate_count', 0)}，"
-                    f"拒绝={document.discovery_metrics.get('rejected_candidate_count', 0)}"
+                    f"拒绝={document.discovery_metrics.get('rejected_candidate_count', 0)}，"
+                    f"Attribute跳过={len(skipped_attribute_ids)}"
                 )
             if self._consolidate_candidates is None:
                 # 仅供注入假服务的应用层测试使用；正式容器始终提供完整批次收敛器。
@@ -208,8 +233,10 @@ class DiscoverFieldsFromBatch:
                     f"全局门禁={consolidation['batch_semantic_gate']}"
                 )
             frozen_candidates = consolidation["frozen_fields"]
-            stage_has_failures = bool(failed_documents) or (
-                consolidation["status"] == "completed_with_failures"
+            stage_has_failures = (
+                bool(failed_documents)
+                or bool(partial_attribute_documents)
+                or consolidation["status"] == "completed_with_failures"
             )
             return {
                 "stage_one": {
@@ -217,6 +244,9 @@ class DiscoverFieldsFromBatch:
                     "document_count": len(state["contract_paths"]),
                     "succeeded_document_count": len(documents),
                     "failed_document_count": len(failed_documents),
+                    "partial_attribute_document_count": len(
+                        partial_attribute_documents
+                    ),
                     "candidate_count": len(frozen_candidates),
                     "raw_candidate_count": len(raw_candidates),
                     "candidate_identity_count": consolidation[
@@ -240,6 +270,7 @@ class DiscoverFieldsFromBatch:
                         item.model_dump(mode="json") for item in documents
                     ],
                     "failed_documents": failed_documents,
+                    "partial_attribute_documents": partial_attribute_documents,
                     "candidate_pool": consolidation["candidate_pool"],
                     "relation_graph": consolidation["relation_graph"],
                     "group_refinements": consolidation["group_refinements"],

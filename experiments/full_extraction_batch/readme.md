@@ -48,15 +48,20 @@ IDE 手动启动时可修改 `run.py` 末尾 `IDE_*` 变量；显式命令行参
 
 每份合同 YAML 同时包含：
 
-- `core`、`attribute`、`clause`、`abstract` 完整结果；
+- `core`、`attribute`、`clause`、`abstract` 结果；Attribute 字段在一次纠错后仍失败时只省略
+  该字段，其他成功字段保留；
 - 四类结果数量；
+- `processing.attribute_extraction` 中的 Attribute 完整/局部状态、跳过字段和脱敏失败诊断；
 - 整份合同墙钟时间；
 - `prepare`、`core`、`attribute`、`clause`、`abstract` 的开始偏移和运行时间，用于核对并行关系；
 - 完整图执行窗口内所有节点按缓存查询量加权的文件级平均缓存命中率；
-- 若失败，保存阶段名、正式门禁摘要和脱敏指标，不保存模型 raw response。
+- 若 Core、Clause 或 Abstract 硬失败，保存阶段名、正式门禁摘要和脱敏指标；Attribute 局部
+  失败仍生成合同 YAML，并在处理诊断中列明。所有路径均不保存模型 raw response。
 
 人工可见追溯使用 PDF 文件名，不展示 `document_id` 哈希。`summary.yaml` 只保存便于汇报的合同
-摘要，完整业务结果留在对应 `contracts/*.yaml`。
+摘要，并通过 `batch.partial_attribute_contract_count` 单独统计 Attribute 局部成功合同；完整业务
+结果留在对应 `contracts/*.yaml`。存在局部成功时批次状态为 `completed_with_failures`，但该合同
+仍计入 `succeeded_contract_count`，不会混入整份失败数。
 
 ---
 

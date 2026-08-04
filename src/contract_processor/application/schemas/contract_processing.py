@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -22,6 +22,17 @@ class ContractAbstract(StrictSchema):
     text: str
 
 
+class AttributeExtractionDiagnostics(StrictSchema):
+    """区分业务未命中与模型/结构校验失败，供专家复核和重试。"""
+
+    status: Literal["completed", "completed_with_failures"] = "completed"
+    validation: dict[str, Any] = Field(default_factory=dict)
+    skipped_field_ids: list[str] = Field(default_factory=list)
+    successful_field_count: int = Field(default=0, ge=0)
+    failed_field_count: int = Field(default=0, ge=0)
+    failed_fields: list[dict[str, Any]] = Field(default_factory=list)
+
+
 class ProcessingMetadata(StrictSchema):
     """随候选返回的可复现版本信息，不包含本地运行目录。"""
 
@@ -32,6 +43,9 @@ class ProcessingMetadata(StrictSchema):
     attribute_schema_version: str
     clause_schema_version: str
     summary_schema_version: str
+    attribute_extraction: AttributeExtractionDiagnostics = Field(
+        default_factory=AttributeExtractionDiagnostics
+    )
 
 
 class ContractProcessingResult(StrictSchema):

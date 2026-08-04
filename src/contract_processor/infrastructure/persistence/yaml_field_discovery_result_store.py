@@ -22,7 +22,8 @@ class YamlFieldDiscoveryResultStore:
     待审核产物，不会修改或自动晋级到正式 ``attribute.yaml``。
     """
 
-    SCHEMA_VERSION = "0.1"
+    # 0.2 增加第一阶段硬失败与 Attribute 局部失败诊断，便于审核时区分两类失败。
+    SCHEMA_VERSION = "0.2"
 
     def __init__(self, root: Path) -> None:
         self._root = root.resolve()
@@ -150,6 +151,15 @@ class YamlFieldDiscoveryResultStore:
                 "document_count": result.stage_two.document_count,
                 "stage_one_status": result.stage_one.status,
                 "stage_two_status": result.stage_two.status,
+                "succeeded_document_count": result.stage_one.succeeded_document_count,
+                "failed_document_count": result.stage_one.failed_document_count,
+                "partial_attribute_document_count": (
+                    result.stage_one.partial_attribute_document_count
+                ),
+                "failed_documents": result.stage_one.failed_documents,
+                "partial_attribute_documents": (
+                    result.stage_one.partial_attribute_documents
+                ),
                 "processing": result.processing.model_dump(mode="json"),
             },
             "fields": fields,

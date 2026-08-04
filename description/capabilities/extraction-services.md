@@ -40,10 +40,11 @@ validation = stage.validation
 metrics = stage.metrics
 ```
 
-`ValidatedExtractionPipelines` 在 application 端口外侧消费 validation，只有通过门禁的 payload
-才会进入工作流状态。
+`ValidatedExtractionPipelines` 在 application 端口外侧消费 validation。Core、Clause 与
+Abstract 只有通过门禁的 payload 才会进入工作流状态；Attribute 允许把已通过字段校验的
+payload 作为局部结果继续传递，并同时输出失败字段诊断。
 
-> **阶段门禁：** 只有通过 `validation` 的 payload 才能进入工作流状态；字段级失败可以隔离，但不完整阶段结果不能越过聚合边界。
+> **阶段门禁：** Core、Clause 与 Abstract 保持阶段硬门禁。Attribute 采用字段级门禁：单字段初次调用和一次纠错均失败后跳过该字段，其他合法字段仍可进入工作流。
 
 ---
 
@@ -55,10 +56,11 @@ metrics = stage.metrics
 - 同一合同的 Core、Clause、Abstract 及未来 Attribute 调用共享
   `models.mllm.max_concurrent_requests` 门禁；默认最多 3 个在途请求，异常和取消时配额自动归还。
 - Prompt、原始响应、失败记录、metrics 和 validation 不写文件；它们只在当前调用内存中传递。
-- 阶段门禁失败时抛出带阶段名、validation 与 metrics 的 `StageValidationError`；正式运行不
-  落盘，实验适配器才可将不含 raw response 的诊断摘要写入自己的运行目录。
-- 模型的字段级或单元级失败隔离逻辑仍然保留，最终阶段 validation 会把不完整结果拒绝在
-  聚合边界之外。
+- Core、Clause 与 Abstract 阶段门禁失败时抛出带阶段名、validation 与 metrics 的
+  `StageValidationError`；正式运行不落盘，实验适配器才可保存脱敏诊断摘要。
+- Attribute 的模型、结构或业务校验失败按字段隔离。字段在一次纠错后仍失败时从结果列表省略，
+  `processing.attribute_extraction` 记录 `completed_with_failures`、字段 ID、尝试次数和失败原因；
+  `not_found` 只表示模型成功判断合同未记载该字段，不能用于掩盖技术失败。
 - Abstract 重试仍逐栏目执行，成功栏目不会因为局部失败而被模型重写。
 - Attribute 复用 Core Step 1 的合同理解地图，以及只含成功规范值的简洁 Core 上下文；二者
   仅作定位辅助，原始 PDF 始终是 Attribute 的事实来源。

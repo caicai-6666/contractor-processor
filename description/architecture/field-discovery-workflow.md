@@ -469,14 +469,16 @@ START
 安全降级为整体 `not_found`。其他部分要素缺失或责任方原文与规范值矛盾时仍进入单字段反馈门禁，
 不得用通用降级掩盖不确定结果。
 
-字节完全相同的输入副本具有相同 `document_id`，第二阶段只计为一份不同合同。第一阶段某份合同
-失败时，该文件仍参与第二阶段回扫：候选可能来自批次内其他合同，不能因其自身第一阶段失败而
-制造统计盲区。
+字节完全相同的输入副本具有相同 `document_id`，第二阶段只计为一份不同合同。第一阶段若
+Core 或候选发现等硬门禁失败，该文件仍参与第二阶段回扫：候选可能来自批次内其他合同，不能因
+其自身第一阶段失败而制造统计盲区。固定 Attribute 的单字段失败不会再使整份合同退出第一阶段；
+成功字段和该合同生成的合法候选会继续参与收敛，失败字段另记为局部诊断。
 
 ### 6.2 观察与频率口径
 
-固定 Core 和固定 Attribute 已在第一阶段对每份合同完整提取，可直接从对应状态累计统计；
-新候选必须执行第二遍全量验证，不能只统计首次提出该字段之后处理的合同。
+固定 Core 和固定 Attribute 已在第一阶段按各自门禁提取；固定 Attribute 可能缺少重试后仍失败的
+字段，因此其技术失败必须单独审阅，不能按 `not_found` 统计。新候选必须执行第二遍全量验证，
+不能只统计首次提出该字段之后处理的合同。
 
 字段统计在批次审核 YAML 中挂在对应字段定义的 `statistics` 键下，至少记录：
 
@@ -540,8 +542,10 @@ Discovery Attribute、Production Core 或 Production Attribute 版本，也可�
 > **审核边界：** 只有专家的目录决策能够把候选写入新的 Discovery 或 Production 字段目录；模型输出始终只是审核材料。
 
 正式批次完成后，`YamlFieldDiscoveryResultStore` 将通过全局门禁的冻结字段与第二阶段统计一一
-关联，并原子写入 `data/definitions/discovery/result/<batch_id>.yaml`。文件采用 `status: draft`；
-每个 `fields[]` 项保持 Attribute 字段定义结构，只增加 `statistics`，其中也保存
+关联，并原子写入 `data/definitions/discovery/result/<batch_id>.yaml`。当前输出
+`schema_version: "0.2"`，文件采用 `status: draft`；批次信息会分别记录第一阶段整份失败合同和
+Attribute 局部失败合同。`fields[]` 中每个字段项保持 Attribute 字段定义结构，只增加
+`statistics`，其中也保存
 `candidate_ref`、`group_id` 和来源候选 ID。不同批次使用独立文件，不覆盖历史批次；写盘或关联
 校验失败会使当前 discovery 调用失败，不能静默返回缺少审核产物的成功结果。
 
