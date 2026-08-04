@@ -38,6 +38,10 @@ experiments/outputs/*
 !/experiments/contract_vector_retrieval/*.py
 !/experiments/contract_vector_retrieval/*.md
 !/experiments/contract_vector_retrieval/*.yaml
+!/experiments/full_extraction_batch/
+!/experiments/full_extraction_batch/*.py
+!/experiments/full_extraction_batch/*.md
+!/experiments/full_extraction_batch/*.yaml
 
 # 字段发现的每次运行结果属于本地实验产物。
 /data/definitions/discovery/result/
